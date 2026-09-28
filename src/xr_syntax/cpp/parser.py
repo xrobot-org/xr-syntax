@@ -315,10 +315,7 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
         """
         keyword = self.lexemes[start].text
         significant = self._significant(start + 1, end)
-        name_index = next(
-            (index for index in significant if self.lexemes[index].kind == "identifier"),
-            None,
-        )
+        name_index = self._class_head_name(significant)
         open_brace = next(
             (index for index in significant if self.lexemes[index].text == "{"),
             None,
@@ -358,6 +355,39 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
         # Keep the semicolon of a normal top-level/member class declaration outside the
         # specifier to preserve compatibility with the existing views.
         return _Replacement(start, class_end, node)
+
+    def _class_head_name(self, significant: list[int]) -> int | None:
+        """跳过 class-head 中的属性说明，返回类名 token 下标。
+        Return the class-name token of a class head, skipping ``[[...]]``,
+        ``alignas(...)``, ``__attribute__((...))`` and ``__declspec(...)``.
+        """
+        position = 0
+        while position < len(significant):
+            index = significant[position]
+            lexeme = self.lexemes[index]
+            if lexeme.text in ("{", ":"):
+                return None
+            skip_to = None
+            if lexeme.text == "[" and index in self._pairs:
+                skip_to = self._pairs[index]
+            elif lexeme.kind == "identifier" and lexeme.text in (
+                "alignas",
+                "__attribute__",
+                "__declspec",
+            ):
+                following = significant[position + 1] if position + 1 < len(significant) else None
+                if following is not None and self.lexemes[following].text == "(":
+                    skip_to = self._pairs.get(following)
+                if skip_to is None:
+                    return None
+            elif lexeme.kind == "identifier":
+                return index
+            if skip_to is None:
+                position += 1
+                continue
+            while position < len(significant) and significant[position] <= skip_to:
+                position += 1
+        return None
 
     def _parse_namespace(self, start: int, end: int) -> _Replacement | None:
         """解析 namespace body，使内部声明仍可结构化查询。

@@ -157,3 +157,18 @@ def test_template_parameter_defaults_keep_nested_template_commas() -> None:
     parameters = document.class_views("Foo")[0].template_parameters
     assert [item.name for item in parameters] == ["T", "N"]
     assert [item.default for item in parameters] == ["std::array<int, 2>", "4"]
+
+
+def test_class_name_after_attributes() -> None:
+    """验证 class-head 中的属性说明不会被当成类名。
+    Verify that attribute specifiers in a class head are not taken as the class name.
+    """
+    source = (
+        "struct [[gnu::packed]] Packed { int a; };\n"
+        "struct alignas(alignof(double)) Aligned { int a; };\n"
+        "struct __attribute__((packed)) GnuPacked { int a; };\n"
+        "class [[nodiscard]] Final final : public Base {};\n"
+        "struct { int a; } anonymous;\n"
+    )
+    names = {view.name for view in CppDocument.parse(source).class_views()}
+    assert names == {"Packed", "Aligned", "GnuPacked", "Final", None}
