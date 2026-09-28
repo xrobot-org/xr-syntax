@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "xr-syntax"
-version = "0.1.0"
+version = "0.2.0"
 description = "Structured C++ and CMake parsing, rewriting, and code generation for XRobot tooling."
 requires-python = ">=3.8"
 authors = [
