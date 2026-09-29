@@ -4,6 +4,7 @@ xr-syntax native C++ lexer. It produces lossless lexemes without performing C++ 
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from xr_syntax.core import Diagnostic, GreenElement, GreenToken, GreenTrivia, SourceSpan
@@ -77,6 +78,19 @@ _PUNCTUATORS = tuple(
         reverse=True,
     )
 )
+
+# 按首字符分组的 punctuator（组内仍为最长优先），避免逐个尝试全部 punctuator。
+# Punctuators grouped by first character (still longest first within a group) so
+# the scanner does not try every punctuator at each position.
+_PUNCTUATORS_BY_FIRST: dict[str, tuple[str, ...]] = {}
+for _punctuator in _PUNCTUATORS:
+    _PUNCTUATORS_BY_FIRST[_punctuator[0]] = _PUNCTUATORS_BY_FIRST.get(_punctuator[0], ()) + (
+        _punctuator,
+    )
+
+# 与 _identifier_continue 等价：ASCII 字母数字、下划线或任意非 ASCII 字符。
+# Equivalent to _identifier_continue: ASCII alphanumerics, underscore or any non-ASCII.
+_IDENTIFIER_TAIL = re.compile(r"(?:\w|[^\x00-\x7f])*")
 
 _STORAGE = {"static", "extern", "thread_local", "mutable", "register"}
 _QUALIFIERS = {"const", "volatile", "restrict", "__restrict", "__restrict__"}
@@ -254,9 +268,11 @@ class _Lexer:
                 continue
 
             if _identifier_start(char):
-                self.index += 1
-                while self.index < self.length and _identifier_continue(self.text[self.index]):
-                    self.index += 1
+                # 该模式可以匹配空串，因此总能匹配成功。
+                # The pattern also matches the empty string, so it always matches.
+                tail = _IDENTIFIER_TAIL.match(self.text, self.index + 1)
+                assert tail is not None
+                self.index = tail.end()
                 word = self.text[start : self.index]
                 if word in {"true", "false", "nullptr"}:
                     result.append(self._emit(word, start, self.index, named=True))
@@ -271,7 +287,11 @@ class _Lexer:
                 continue
 
             punctuator = next(
-                (item for item in _PUNCTUATORS if self.text.startswith(item, start)),
+                (
+                    item
+                    for item in _PUNCTUATORS_BY_FIRST.get(char, ())
+                    if self.text.startswith(item, start)
+                ),
                 None,
             )
             if punctuator is not None:
@@ -288,6 +308,8 @@ class _Lexer:
         """识别普通/宽字符/UTF/原始字符串字面量。
         Recognize ordinary, wide, UTF-prefixed, and raw string/character literals.
         """
+        if self.text[start] not in "uULR\"'":
+            return None
         prefixes = (
             'u8R"',
             'uR"',
