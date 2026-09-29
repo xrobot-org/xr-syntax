@@ -6,8 +6,8 @@ from __future__ import annotations
 
 import argparse
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable, List
 
 from xr_syntax.cpp import CppDocument, CppFactory
 
@@ -31,7 +31,7 @@ def _make_source(target_bytes: int) -> bytes:
     """生成接近指定字节数的稳定 C++ declaration corpus。
     Build a deterministic C++ declaration corpus near the requested byte size.
     """
-    lines: List[str] = []
+    lines: list[str] = []
     size = 0
     index = 0
     while size < target_bytes:
@@ -101,7 +101,7 @@ def benchmark_case(target_bytes: int, batch_edits: int) -> BenchmarkResult:
     )
 
 
-def run(sizes: Iterable[int], batch_edits: int) -> List[BenchmarkResult]:
+def run(sizes: Iterable[int], batch_edits: int) -> list[BenchmarkResult]:
     """依次运行多个输入规模。
     Run benchmark cases for each requested input size.
     """

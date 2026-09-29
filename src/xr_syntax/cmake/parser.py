@@ -5,7 +5,7 @@ CMake source parser.
 from __future__ import annotations
 
 import re
-from typing import List, Optional, Sequence, Tuple
+from collections.abc import Sequence
 
 from xr_syntax.core import (
     Diagnostic,
@@ -118,13 +118,13 @@ class _CMakeStructuralParser:
         """
         self.text = text
         self.length = len(text)
-        self.diagnostics: List[Diagnostic] = []
+        self.diagnostics: list[Diagnostic] = []
 
     def parse(self) -> GreenNode:
         """解析整个 CMake 文件。
         Parse the complete CMake file.
         """
-        children: List[GreenChild] = []
+        children: list[GreenChild] = []
         cursor = 0
         while cursor < self.length:
             command = self._command_at(cursor)
@@ -162,7 +162,7 @@ class _CMakeStructuralParser:
             cursor += 1
         return self.length
 
-    def _command_at(self, start: int) -> Optional[Tuple[GreenNode, int]]:
+    def _command_at(self, start: int) -> tuple[GreenNode, int] | None:
         """尝试从指定位置解析一个命令。
         Parse a command starting at the given offset when present.
         """
@@ -186,7 +186,7 @@ class _CMakeStructuralParser:
             end = close + 1
             closed = True
 
-        children: List[GreenChild] = [
+        children: list[GreenChild] = [
             GreenChild(GreenToken("identifier", self.text[start:name_end], named=True), "name")
         ]
         if name_end < cursor:
@@ -200,7 +200,7 @@ class _CMakeStructuralParser:
             children.append(GreenChild(GreenToken(")", ")", named=False)))
         return GreenNode("normal_command", tuple(children), named=True), end
 
-    def _matching_paren(self, opening: int) -> Optional[int]:
+    def _matching_paren(self, opening: int) -> int | None:
         """查找与命令左括号匹配的右括号。
         Find the closing parenthesis matching a command opener.
         """
@@ -238,7 +238,7 @@ class _CMakeStructuralParser:
         """解析命令参数区域。
         Parse the argument region of a command.
         """
-        children: List[GreenChild] = []
+        children: list[GreenChild] = []
         cursor = start
         while cursor < end:
             if self.text[cursor].isspace():
@@ -290,7 +290,7 @@ class _CMakeStructuralParser:
         self._diagnose("unterminated quoted argument", start, self.length)
         return self.length
 
-    def _bracket_end(self, start: int, limit: Optional[int] = None) -> Optional[int]:
+    def _bracket_end(self, start: int, limit: int | None = None) -> int | None:
         """扫描 bracket argument 或 bracket comment 的括号区间。
         Scan a bracket argument or bracket comment range.
         """
@@ -310,7 +310,7 @@ class _CMakeStructuralParser:
             return end
         return found + len(closing)
 
-    def _comment_end(self, start: int, limit: Optional[int] = None) -> Optional[int]:
+    def _comment_end(self, start: int, limit: int | None = None) -> int | None:
         """扫描行注释或 bracket comment。
         Scan a line comment or bracket comment.
         """
@@ -347,12 +347,12 @@ class _CMakeStructuralParser:
         self,
         children: Sequence[GreenChild],
         start: int,
-        closing_name: Optional[str],
-    ) -> Tuple[List[GreenChild], int]:
+        closing_name: str | None,
+    ) -> tuple[list[GreenChild], int]:
         """把成对的块命令组合为结构节点。
         Group paired block commands into structural nodes.
         """
-        output: List[GreenChild] = []
+        output: list[GreenChild] = []
         cursor = start
         while cursor < len(children):
             child = children[cursor]
@@ -380,7 +380,7 @@ class _CMakeStructuralParser:
         return output, cursor
 
     @staticmethod
-    def _command_name(element: GreenElement) -> Optional[str]:
+    def _command_name(element: GreenElement) -> str | None:
         """读取 normal_command 的小写名称。
         Return the case-folded name of a normal command.
         """

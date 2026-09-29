@@ -4,8 +4,8 @@ Public C++ lexical-token queries with explicit character and byte positions.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Sequence
 
 from xr_syntax.core import SourceSpan
 

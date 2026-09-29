@@ -7,15 +7,15 @@ from __future__ import annotations
 import argparse
 import json
 import re
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
 
 from xrobot.ModuleParser import parse_constructor_args, parse_manifest_from_header
 
 from xr_syntax.cpp import CppDocument, CppParameterView
 
 
-def _normalized_type(value: Optional[str]) -> str:
+def _normalized_type(value: str | None) -> str:
     """压缩类型文本中的空白，供固定前置参数识别。
     Normalize whitespace in type text for fixed-prefix parameter detection.
     """
@@ -42,12 +42,12 @@ def _is_application_prefix(parameters: tuple[CppParameterView, ...]) -> bool:
     return "HardwareContainer" in first and "ApplicationManager" in second
 
 
-def compare_header(header: Path) -> Dict[str, object]:
+def compare_header(header: Path) -> dict[str, object]:
     """比较一个模块主头文件，并返回可序列化结果。
     Compare one primary module header and return a serializable result row.
     """
     module_name = header.parent.name
-    result: Dict[str, object] = {
+    result: dict[str, object] = {
         "module": module_name,
         "header": str(header),
     }
@@ -119,11 +119,11 @@ def compare_header(header: Path) -> Dict[str, object]:
     return result
 
 
-def compare_modules(root: Path) -> Dict[str, object]:
+def compare_modules(root: Path) -> dict[str, object]:
     """比较目录中的全部主模块头文件并汇总结果。
     Compare every primary module header below a directory and summarize the results.
     """
-    rows: List[Dict[str, object]] = [
+    rows: list[dict[str, object]] = [
         compare_header(header) for header in _primary_headers(root)
     ]
     mismatches = [row for row in rows if row["status"] == "mismatch"]

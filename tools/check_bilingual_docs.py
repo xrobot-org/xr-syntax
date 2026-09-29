@@ -10,32 +10,31 @@ import io
 import re
 import tokenize
 from pathlib import Path
-from typing import List, Optional, Tuple
 
 _CHINESE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
 _ENGLISH_WORD = re.compile(r"\b[A-Za-z][A-Za-z0-9+-]*\b")
 _SKIP = {".git", ".mypy_cache", ".pytest_cache", ".ruff_cache", "__pycache__", "build", "dist"}
 
 
-def _has_chinese(text: Optional[str]) -> bool:
+def _has_chinese(text: str | None) -> bool:
     """判断文本是否包含中文。
     Return whether text contains Chinese characters.
     """
     return bool(text and _CHINESE.search(text))
 
 
-def _has_english(text: Optional[str]) -> bool:
+def _has_english(text: str | None) -> bool:
     """判断文本是否包含可读英文说明。
     Return whether text contains readable English prose.
     """
     return bool(text and len(_ENGLISH_WORD.findall(text)) >= 3)
 
 
-def _python_files(root: Path) -> List[Path]:
+def _python_files(root: Path) -> list[Path]:
     """列出项目源码、测试和工具中的 Python 文件。
     List Python files from project source, tests, and tools.
     """
-    files: List[Path] = []
+    files: list[Path] = []
     for directory in ("src", "tests", "tools"):
         base = root / directory
         if not base.exists():
@@ -49,7 +48,7 @@ def _python_files(root: Path) -> List[Path]:
 
 
 def _check_docstring(
-    issues: List[Tuple[Path, int, str]],
+    issues: list[tuple[Path, int, str]],
     path: Path,
     node: ast.AST,
     label: str,
@@ -73,13 +72,13 @@ class _Visitor(ast.NodeVisitor):
     Visit class and function definitions in a Python module.
     """
 
-    def __init__(self, path: Path, issues: List[Tuple[Path, int, str]]) -> None:
+    def __init__(self, path: Path, issues: list[tuple[Path, int, str]]) -> None:
         """保存当前文件和问题列表。
         Store the current file and issue list.
         """
         self.path = path
         self.issues = issues
-        self.stack: List[str] = []
+        self.stack: list[str] = []
 
     def _visit_definition(self, node: ast.AST, name: str) -> None:
         """检查定义并继续遍历其子节点。
@@ -110,11 +109,11 @@ class _Visitor(ast.NodeVisitor):
         self._visit_definition(node, node.name)
 
 
-def _audit_python(root: Path) -> List[Tuple[Path, int, str]]:
+def _audit_python(root: Path) -> list[tuple[Path, int, str]]:
     """检查全部 Python 模块、类、函数和 runtime 行注释。
     Audit Python docstrings and require Chinese line comments in runtime files.
     """
-    issues: List[Tuple[Path, int, str]] = []
+    issues: list[tuple[Path, int, str]] = []
     runtime_root = root / "src" / "xr_syntax"
 
     for path in _python_files(root):
@@ -135,7 +134,7 @@ def _audit_python(root: Path) -> List[Tuple[Path, int, str]]:
     return issues
 
 
-def _audit_markdown(root: Path) -> List[Tuple[Path, int, str]]:
+def _audit_markdown(root: Path) -> list[tuple[Path, int, str]]:
     """检查 README 和 docs 下的 Markdown 是否包含中英文。
     Check README and docs Markdown files for Chinese and English.
     """
@@ -144,7 +143,7 @@ def _audit_markdown(root: Path) -> List[Tuple[Path, int, str]]:
     if docs.exists():
         paths.extend(sorted(docs.rglob("*.md")))
 
-    issues: List[Tuple[Path, int, str]] = []
+    issues: list[tuple[Path, int, str]] = []
     for path in paths:
         if not path.exists():
             continue
@@ -159,7 +158,7 @@ def _audit_markdown(root: Path) -> List[Tuple[Path, int, str]]:
     return issues
 
 
-def audit(root: Path) -> List[Tuple[Path, int, str]]:
+def audit(root: Path) -> list[tuple[Path, int, str]]:
     """运行完整双语文档检查。
     Run the complete bilingual documentation audit.
     """
