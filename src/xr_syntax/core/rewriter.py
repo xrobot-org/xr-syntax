@@ -11,10 +11,12 @@ from .tree import SyntaxTree
 # 模块实现：定义持久化语法树重写器；未修改的 green 子树保持对象复用。
 # ---------------------------------------------------------------------------
 
+
 class SyntaxRewriter:
     """按函数式方式重写 green 树；钩子返回原对象时保持 identity，使未变化的祖先分支可以继续复用。
     Functional green-tree rewriter.
     """
+
     def rewrite(self, tree: SyntaxTree) -> SyntaxTree:
         """重写整棵树；发生修改时将 diagnostics 标记为未知。
         Rewrite a tree and mark diagnostics unknown when the green root changes.

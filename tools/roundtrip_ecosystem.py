@@ -1,6 +1,7 @@
 """批量扫描 C/C++/头文件并统计原生 C++ parser 的无损 round-trip 和诊断结果。
 Batch-scan C/C++ sources and headers and report native-parser round-trip and diagnostic results.
 """
+
 from __future__ import annotations
 
 import argparse

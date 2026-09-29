@@ -21,11 +21,13 @@ from .syntax_utils import (
 # Typed convenience views over the complete C++ syntax tree
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class CppIncludeView:
     """提供 include 指令的路径、头文件名和 system/local 属性访问。
     Convenience view of one C++ preprocessor include directive.
     """
+
     node: SyntaxNode
 
     @property
@@ -44,10 +46,7 @@ class CppIncludeView:
         path = self.path
         if path is None:
             return None
-        if (
-            len(path) >= 2
-            and (path[0], path[-1]) in {('"', '"'), ("<", ">")}
-        ):
+        if len(path) >= 2 and (path[0], path[-1]) in {('"', '"'), ("<", ">")}:
             return path[1:-1]
         return path
 
@@ -65,6 +64,7 @@ class CppVariableView:
     """提供变量声明的名称、基础类型、修饰符、初始化器和作用域信息。
     Source-structural view of one declarator inside a C++ declaration.
     """
+
     node: SyntaxNode
     declarator: SyntaxElement
 
@@ -134,6 +134,7 @@ class CppParameterView:
     """提供函数参数的原文、名称、类型和默认值访问。
     Convenience view exposing a function parameter's source name/type/default text.
     """
+
     node: SyntaxNode
 
     @property
@@ -173,6 +174,7 @@ class CppTemplateParameterView:
     """提供模板参数的原文、名称、类型和默认值访问。
     Convenience view exposing a template parameter's source components.
     """
+
     node: SyntaxNode
 
     @property
@@ -212,6 +214,7 @@ class CppFunctionView:
     """提供函数或方法的名称、declarator、参数、函数体和特殊成员状态。
     Source-structural function/method view with parameter and special-member helpers.
     """
+
     node: SyntaxNode
     access: str | None = None
 
@@ -273,6 +276,7 @@ class CppCallView:
     """提供调用表达式的被调表达式文本和实参列表访问。
     Convenience view of a call expression and its argument syntax elements.
     """
+
     node: SyntaxNode
 
     @property
@@ -302,6 +306,7 @@ class CppClassView:
     """扫描 class/struct 成员并跟踪有效访问控制的便捷视图。
     Convenience class/struct view that tracks C++ access sections while scanning members.
     """
+
     node: SyntaxNode
 
     @property

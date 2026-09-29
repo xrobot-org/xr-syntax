@@ -78,8 +78,7 @@ class CMakeParser:
         self._schema = ParserSchema(
             "cmake",
             tuple(
-                ParserKindInfo(index, name, named)
-                for index, (name, named) in enumerate(ordered)
+                ParserKindInfo(index, name, named) for index, (name, named) in enumerate(ordered)
             ),
             tuple(fields),
         )
@@ -193,9 +192,7 @@ class _CMakeStructuralParser:
             children.append(GreenChild(self._trivia(self.text[name_end:cursor])))
         children.append(GreenChild(GreenToken("(", "(", named=False)))
         arg_end = close if closed else self.length
-        children.append(
-            GreenChild(self._argument_list(cursor + 1, arg_end), "arguments")
-        )
+        children.append(GreenChild(self._argument_list(cursor + 1, arg_end), "arguments"))
         if closed:
             children.append(GreenChild(GreenToken(")", ")", named=False)))
         return GreenNode("normal_command", tuple(children), named=True), end

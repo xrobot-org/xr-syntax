@@ -17,6 +17,7 @@ from .factory import CppFactory
 # 模块实现：提供 C++ 文件、函数和代码块的批量源码构建器。
 # ---------------------------------------------------------------------------
 
+
 # BlockBuilder 只累积 draft/fragment，不为每一条语句单独 parse；完整函数或文件
 # 在 build() 边界统一解析一次，避免生成大量小 parser 调用。
 @dataclass
@@ -175,10 +176,7 @@ class CppFunctionBuilder:
         )
         body = join(
             hardline,
-            (
-                verbatim(self.factory._source_of(item).rstrip("\r\n"))
-                for item in self.body.items
-            ),
+            (verbatim(self.factory._source_of(item).rstrip("\r\n")) for item in self.body.items),
         )
         if self.body.items:
             document = concat(

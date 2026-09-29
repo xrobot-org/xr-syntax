@@ -1,6 +1,7 @@
 """验证原生 C++ parser 的 runtime schema 和现代 C++ 结构分类。
 Test the native C++ parser runtime schema and modern C++ syntax classification.
 """
+
 import sys
 
 from xr_syntax.cpp import CppDocument, CppParser

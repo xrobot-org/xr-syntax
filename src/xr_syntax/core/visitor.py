@@ -10,10 +10,12 @@ from .red import SyntaxElement, SyntaxNode, SyntaxToken, SyntaxTrivia
 # 模块实现：定义面向 red 语法视图的只读深度优先访问器。
 # ---------------------------------------------------------------------------
 
+
 class SyntaxVisitor:
     """按源码顺序深度优先遍历 red 语法元素的只读访问器。
     Read-only depth-first visitor over red syntax views.
     """
+
     def visit(self, element: SyntaxElement) -> None:
         """按源码顺序分派 node、token 和 trivia，并递归遍历 node children。
         Dispatch to node/token/trivia hooks while preserving source traversal order.

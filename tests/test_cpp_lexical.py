@@ -16,8 +16,8 @@ def test_code_tokens_keep_character_and_byte_offsets_distinct() -> None:
     source = "/* 中文 */ value + 1"
     tokens = code_tokens(source)
     value = next(item for item in tokens if item.text == "value")
-    assert source[value.start:value.end] == "value"
-    assert source.encode("utf-8")[value.span.start:value.span.end] == b"value"
+    assert source[value.start : value.end] == "value"
+    assert source.encode("utf-8")[value.span.start : value.span.end] == b"value"
     assert value.start != value.span.start
 
 

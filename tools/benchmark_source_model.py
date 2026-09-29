@@ -112,10 +112,7 @@ def _print_results(results: Iterable[BenchmarkResult]) -> None:
     """以 TSV 输出结果，便于复制到表格或日志。
     Print results as TSV for easy capture in logs or spreadsheets.
     """
-    print(
-        "bytes\tdeclarations\tparse_ms\tquery_ms\tsingle_edit_ms\t"
-        "batch_edits\tbatch_edit_ms"
-    )
+    print("bytes\tdeclarations\tparse_ms\tquery_ms\tsingle_edit_ms\tbatch_edits\tbatch_edit_ms")
     for item in results:
         print(
             f"{item.bytes}\t{item.declarations}\t{item.parse_ms:.3f}\t"

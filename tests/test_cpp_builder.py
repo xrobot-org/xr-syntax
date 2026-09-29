@@ -1,6 +1,7 @@
 """验证 C++ 文件、函数和代码块构建器覆盖常用生成场景。
 Test common C++ file, function, and block generation workflows.
 """
+
 from xr_syntax.cpp import CppFileBuilder
 
 

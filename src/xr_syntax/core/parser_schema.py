@@ -10,11 +10,13 @@ from dataclasses import dataclass
 # 模块实现：定义具体 parser 运行时暴露的 kind 与 field 标识表。
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class ParserKindInfo:
     """记录具体 parser 的 kind id、名称以及 named 属性。
     Describe one runtime parser kind id/name/named identity.
     """
+
     id: int
     name: str
     named: bool

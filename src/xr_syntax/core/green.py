@@ -15,10 +15,12 @@ from .text import encode_source
 # Immutable green storage
 # ---------------------------------------------------------------------------
 
+
 class _GreenMixin:
     """定义所有 green 元素共同需要提供的渲染和字节宽度接口。
     Define the rendering and byte-width interface shared by all green elements.
     """
+
     def render(self) -> str:
         """渲染当前 green 元素所代表的源码文本。
         Render the source text represented by this green element.
@@ -38,6 +40,7 @@ class GreenTrivia(_GreenMixin):
     """表示 parser 未作为语法 child 暴露、但为逐字节 round-trip 必须原样保存的空白或源码间隙。
     Immutable source text that is not represented as a parser syntax child.
     """
+
     kind: str
     text: str
 
@@ -60,6 +63,7 @@ class GreenToken(_GreenMixin):
     """表示不可变的叶子 token，并保存它实际代表的源码文本。
     Immutable leaf syntax element containing exactly the represented source text.
     """
+
     kind: str
     text: str
     named: bool = False
@@ -90,6 +94,7 @@ class GreenChild:
     """表示 GreenNode 到子元素的一条边，并携带可选 field 标签。
     One child edge in a green node, including the parser field name when available.
     """
+
     element: GreenElement
     field: str | None = None
 
@@ -103,6 +108,7 @@ class GreenNode(_GreenMixin):
     """表示不可变且与绝对位置无关的语法节点。
     Immutable, position-independent syntax node.
     """
+
     kind: str
     children: tuple[GreenChild, ...]
     named: bool = True

@@ -12,11 +12,13 @@ from xr_syntax.core import SyntaxElement, SyntaxNode
 # 模块实现：提供 CMake 命令与参数的轻量只读视图，保留原始源码文本和语法节点。
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class CMakeArgumentView:
     """表示一个 CMake 参数的便捷视图，同时保留其原始语法文本。
     Convenience view of one CMake argument while retaining its original syntax text.
     """
+
     node: SyntaxElement
 
     @property
@@ -43,6 +45,7 @@ class CMakeCommandView:
     """统一普通命令和块命令的名称与参数访问方式。
     Convenience view that normalizes the name/arguments of normal and block commands.
     """
+
     node: SyntaxNode
 
     @property
@@ -57,7 +60,7 @@ class CMakeCommandView:
         for child in self.node.syntax_children:
             if child.kind not in {"argument_list", "(", ")"}:
                 return child.text
-        return (self.node.kind[:-8] if self.node.kind.endswith("_command") else self.node.kind)
+        return self.node.kind[:-8] if self.node.kind.endswith("_command") else self.node.kind
 
     @property
     def arguments(self) -> tuple[CMakeArgumentView, ...]:

@@ -15,10 +15,12 @@ from .view import CMakeCommandView
 # CMake document queries using the shared syntax core
 # ---------------------------------------------------------------------------
 
+
 class CMakeDocument(SyntaxDocument):
     """在通用不可变语法树之上提供 CMake 专用查询和编辑接口。
     CMake-specific query facade over the same immutable syntax core used by C++.
     """
+
     __slots__ = ()
 
     language = "cmake"
@@ -60,11 +62,7 @@ class CMakeDocument(SyntaxDocument):
         if name is None:
             return nodes
         normalized = name.casefold()
-        return tuple(
-            node
-            for node in nodes
-            if CMakeCommandView(node).name.casefold() == normalized
-        )
+        return tuple(node for node in nodes if CMakeCommandView(node).name.casefold() == normalized)
 
     def command_views(self, name: str | None = None) -> tuple[CMakeCommandView, ...]:
         """返回类型化命令视图，并可按命令名过滤。

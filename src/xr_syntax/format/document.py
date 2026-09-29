@@ -13,10 +13,12 @@ from enum import Enum
 # Layout document IR
 # ---------------------------------------------------------------------------
 
+
 class Doc:
     """所有语言无关布局文档节点的基类。
     Base type for the language-neutral layout document IR.
     """
+
     pass
 
 
@@ -25,6 +27,7 @@ class Text(Doc):
     """表示不会参与自动换行决策的字面输出文本。
     Literal output text that never participates in line breaking.
     """
+
     value: str
 
 
@@ -33,6 +36,7 @@ class Line(Doc):
     """表示可平铺为空格/空串、也可在 break 模式下输出换行的布局节点。
     Potential line break. In flat mode it emits flat; in break mode it emits a newline.
     """
+
     flat: str = " "
     hard: bool = False
 
@@ -42,6 +46,7 @@ class Concat(Doc):
     """表示多个布局文档按顺序拼接。
     Ordered concatenation of layout documents.
     """
+
     parts: tuple[Doc, ...]
 
 
@@ -50,6 +55,7 @@ class Indent(Doc):
     """表示 content 内发生换行时需要增加的缩进层级。
     Increase indentation for line breaks inside content.
     """
+
     content: Doc
     levels: int = 1
 
@@ -59,6 +65,7 @@ class Group(Doc):
     """表示优先尝试单行平铺、宽度不足时整体进入 break 模式的布局组。
     Prefer a flat rendering when the complete group fits the remaining width.
     """
+
     content: Doc
 
 
@@ -67,6 +74,7 @@ class IfBreak(Doc):
     """根据外层 group 是否换行选择不同的布局内容。
     Select different layout content depending on whether the enclosing group breaks.
     """
+
     broken: Doc
     flat: Doc
 
@@ -79,6 +87,7 @@ class _Mode(Enum):
     """表示布局渲染当前采用 FLAT 或 BREAK 两种模式之一。
     Represent one of the FLAT or BREAK layout-rendering modes.
     """
+
     FLAT = 1
     BREAK = 2
 
@@ -169,20 +178,14 @@ def render(doc: Doc, *, width: int = 88, indent: str = "  ") -> str:
         elif isinstance(current, Indent):
             stack.append((level + current.levels, mode, current.content))
         elif isinstance(current, IfBreak):
-            stack.append(
-                (level, mode, current.flat if mode is _Mode.FLAT else current.broken)
-            )
+            stack.append((level, mode, current.flat if mode is _Mode.FLAT else current.broken))
         elif isinstance(current, Group):
             # Group 是唯一能在平铺与换行之间做选择的节点；内部 Line 只执行
             # 已经选定的模式，避免局部节点各自做宽度决策。
             # A group is the only place that chooses between flat and broken
             # layout. Nested Line nodes merely obey the selected mode.
             trial = (level, _Mode.FLAT, current.content)
-            selected = (
-                _Mode.FLAT
-                if _fits(width - column, [trial, *stack])
-                else _Mode.BREAK
-            )
+            selected = _Mode.FLAT if _fits(width - column, [trial, *stack]) else _Mode.BREAK
             stack.append((level, selected, current.content))
         else:
             raise TypeError(type(current))

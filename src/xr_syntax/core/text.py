@@ -8,6 +8,7 @@ from __future__ import annotations
 # 模块实现：提供源码 bytes 与 Python str 的无损转换，并用 surrogateescape 保留非 UTF-8 字节。
 # ---------------------------------------------------------------------------
 
+
 def decode_source(data: bytes) -> str:
     """使用 surrogateescape 解码源码字节，使不可解码字节仍可无损还原。
     Decode source bytes with surrogateescape so undecodable bytes can round-trip unchanged.

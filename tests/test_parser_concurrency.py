@@ -14,6 +14,7 @@ def _run_many(parser, sources: list[bytes]) -> list[bytes]:
     """并发解析输入并返回 round-trip 字节。
     Parse inputs concurrently and return their round-tripped bytes.
     """
+
     def parse(source: bytes) -> bytes:
         """执行单次无损解析。
         Run one lossless parse operation.
@@ -29,10 +30,7 @@ def test_cpp_parser_instance_supports_concurrent_parse_calls() -> None:
     A shared CppParser instance can parse independent sources concurrently.
     """
     parser = CppParser()
-    sources = [
-        f"void f{i}() {{ target({i}); }}\n".encode()
-        for i in range(64)
-    ]
+    sources = [f"void f{i}() {{ target({i}); }}\n".encode() for i in range(64)]
     assert _run_many(parser, sources) == sources
 
 
@@ -42,7 +40,6 @@ def test_cmake_parser_instance_supports_concurrent_parse_calls() -> None:
     """
     parser = CMakeParser()
     sources = [
-        f"project(Demo{i})\nadd_library(lib{i} STATIC file{i}.cpp)\n".encode()
-        for i in range(64)
+        f"project(Demo{i})\nadd_library(lib{i} STATIC file{i}.cpp)\n".encode() for i in range(64)
     ]
     assert _run_many(parser, sources) == sources

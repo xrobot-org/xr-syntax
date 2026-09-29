@@ -13,11 +13,13 @@ from typing import Any
 # Language-neutral grammar contracts
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class GrammarTypeRef:
     """用 kind 和 named/anonymous 属性唯一标识一种 grammar 类型。
     Identify one grammar type by Tree-sitter kind name and named/anonymous status.
     """
+
     kind: str
     named: bool
 
@@ -27,6 +29,7 @@ class GrammarSlot:
     """描述一个 grammar 字段或通用 children 槽允许出现的类型及数量约束。
     Describe the allowed contents of one grammar field or generic child slot.
     """
+
     multiple: bool
     required: bool
     types: tuple[GrammarTypeRef, ...]
@@ -43,6 +46,7 @@ class GrammarNodeSpec:
     """描述一种语法 kind 的 grammar 元数据。
     Structural contract for one syntax kind from node-types.json.
     """
+
     kind: str
     named: bool
     root: bool = False
@@ -69,6 +73,7 @@ class LanguageGrammar:
     """表示与具体 parser 运行时对象解耦的语言结构 grammar。
     Versioned language grammar independent of the parser runtime object.
     """
+
     language: str
     version: str
     source_revision: str
@@ -108,16 +113,12 @@ class LanguageGrammar:
         if named is not None:
             return self._node_map.get((kind, named))
         matches = tuple(
-            node
-            for (candidate, _), node in self._node_map.items()
-            if candidate == kind
+            node for (candidate, _), node in self._node_map.items() if candidate == kind
         )
         if not matches:
             return None
         if len(matches) != 1:
-            raise ValueError(
-                f"{self.language} grammar kind {kind!r} is ambiguous; specify named="
-            )
+            raise ValueError(f"{self.language} grammar kind {kind!r} is ambiguous; specify named=")
         return matches[0]
 
     def require_node(
@@ -181,6 +182,7 @@ class LanguageGrammar:
         # 这样 grammar 升级时差异可以直接审计。
         # node-types.json is treated as versioned source data, not copied into a
         # handwritten class hierarchy. This keeps grammar upgrades auditable.
+
     @classmethod
     def from_node_types(
         cls,
@@ -251,10 +253,7 @@ def _node_spec(data: dict[str, Any]) -> GrammarNodeSpec:
         kind=_string(data, "type"),
         named=_bool(data, "named"),
         root=bool(data.get("root", False)),
-        fields=tuple(
-            (name, _slot(spec))
-            for name, spec in sorted(raw_fields.items())
-        ),
+        fields=tuple((name, _slot(spec)) for name, spec in sorted(raw_fields.items())),
         children=None if raw_children is None else _slot(raw_children),
         subtypes=tuple(_type_ref(item) for item in raw_subtypes),
     )

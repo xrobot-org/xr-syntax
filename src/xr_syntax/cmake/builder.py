@@ -16,6 +16,7 @@ from .factory import CMakeFactory
 # 模块实现：提供只在 build() 边界解析一次的 CMake 文件构建器。
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class CMakeFileBuilder:
     """累积 CMake source draft，并在 build() 时统一解析。
@@ -77,10 +78,7 @@ class CMakeFileBuilder:
         """渲染全部源码并只 parse 一次；可要求生成结果没有 diagnostics。
         Parse the complete generated file once and optionally require a clean result.
         """
-        rendered = [
-            self.factory._source_of(item).rstrip("\r\n")
-            for item in self.items
-        ]
+        rendered = [self.factory._source_of(item).rstrip("\r\n") for item in self.items]
         source = "\n".join(rendered)
         if source and not source.endswith("\n"):
             source += "\n"

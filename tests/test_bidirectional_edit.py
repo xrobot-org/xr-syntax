@@ -1,6 +1,7 @@
 """验证 C++ 结构化编辑会重新解析，同时保持未修改源码和保护区域不变。
 Test that structured C++ edits reparse correctly while preserving unrelated source and protected regions.
 """
+
 from xr_syntax.cpp import CppDocument, CppFactory
 
 SOURCE = """#include "a.hpp"

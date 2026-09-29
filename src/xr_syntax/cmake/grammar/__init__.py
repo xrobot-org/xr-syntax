@@ -31,14 +31,11 @@ def _load() -> LanguageGrammar:
     digest = hashlib.sha256(normalized).hexdigest()
     if digest != NODE_TYPES_SHA256:
         raise RuntimeError(
-            "packaged CMake grammar schema checksum mismatch: "
-            f"{digest} != {NODE_TYPES_SHA256}"
+            f"packaged CMake grammar schema checksum mismatch: {digest} != {NODE_TYPES_SHA256}"
         )
 
     decoded: Any = json.loads(text)
-    if not isinstance(decoded, list) or not all(
-        isinstance(item, dict) for item in decoded
-    ):
+    if not isinstance(decoded, list) or not all(isinstance(item, dict) for item in decoded):
         raise RuntimeError("packaged CMake node-types schema has an invalid root")
 
     return LanguageGrammar.from_node_types(

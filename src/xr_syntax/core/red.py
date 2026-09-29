@@ -19,10 +19,12 @@ if TYPE_CHECKING:
 # Snapshot-specific red views
 # ---------------------------------------------------------------------------
 
+
 class SyntaxElement:
     """把 green 元素绑定到一个 SyntaxTree 快照。
     Snapshot-specific view that adds parent, field, index and byte offset to a green element.
     """
+
     __slots__ = ("_tree", "_green", "_parent", "_index", "_offset", "_field")
 
     def __init__(
@@ -212,10 +214,7 @@ class SyntaxNode(SyntaxElement):
         return tuple(
             child
             for child in self.syntax_children
-            if (
-                isinstance(child, (SyntaxNode, SyntaxToken))
-                and child.named
-            )
+            if (isinstance(child, (SyntaxNode, SyntaxToken)) and child.named)
         )
 
     @property
@@ -223,11 +222,7 @@ class SyntaxNode(SyntaxElement):
         """只返回 named 的 SyntaxNode 子节点。
         Return named child nodes only.
         """
-        return tuple(
-            child
-            for child in self.named_syntax_children
-            if isinstance(child, SyntaxNode)
-        )
+        return tuple(child for child in self.named_syntax_children if isinstance(child, SyntaxNode))
 
     def child_by_field(self, field: str) -> SyntaxElement | None:
         """返回指定 field 上的第一个 child；不存在时返回 None。
@@ -247,9 +242,7 @@ class SyntaxNode(SyntaxElement):
         Return field labels present on this syntax node.
         """
         return tuple(
-            dict.fromkeys(
-                child.field for child in self.children if child.field is not None
-            )
+            dict.fromkeys(child.field for child in self.children if child.field is not None)
         )
 
     def descendants(

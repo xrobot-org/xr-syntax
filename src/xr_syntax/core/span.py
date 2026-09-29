@@ -10,11 +10,13 @@ from dataclasses import dataclass
 # 模块实现：定义语法节点和诊断共同使用的字节范围与行列位置。
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True, order=True)
 class SourcePoint:
     """表示 parser 报告的零基行号和列号位置。
     Zero-based row/column location reported by the parser backend.
     """
+
     row: int
     column: int
 
@@ -24,6 +26,7 @@ class SourceSpan:
     """表示原始源码编码中的半开字节区间 [start, end)。
     Half-open byte range [start, end) in the original source encoding.
     """
+
     start: int
     end: int
 

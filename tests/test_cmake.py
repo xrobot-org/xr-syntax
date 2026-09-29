@@ -18,13 +18,9 @@ def test_cmake_grammar_schema_matches_native_runtime() -> None:
     Verify that packaged CMake grammar metadata matches the native parser.
     """
     assert CMAKE_GRAMMAR.version == "0.7.4"
-    assert CMAKE_GRAMMAR.source_revision == (
-        "ca627bb5828616b6246aafdc3c3222789e728e37"
-    )
+    assert CMAKE_GRAMMAR.source_revision == ("ca627bb5828616b6246aafdc3c3222789e728e37")
     assert len(CMAKE_GRAMMAR.nodes) == 71
-    assert [(node.kind, node.named) for node in CMAKE_GRAMMAR.roots] == [
-        ("source_file", True)
-    ]
+    assert [(node.kind, node.named) for node in CMAKE_GRAMMAR.roots] == [("source_file", True)]
 
     runtime_kinds = CMakeParser().schema.kind_names
     missing: set[tuple[str, bool]] = set()
@@ -123,6 +119,7 @@ def test_cmake_builder_parses_only_once_at_build_boundary() -> None:
     """验证 CMake builder-only 路径最终只 parse 一次。
     Verify that the CMake builder-only path parses once at the final build boundary.
     """
+
     class CountingParser(CMakeParser):
         """记录 parse 调用次数的测试 CMake parser。
         Test CMake parser that counts parse calls.
@@ -183,7 +180,7 @@ def test_cmake_surrogateescaped_text_input_roundtrips_losslessly() -> None:
     """验证 CMake 对 surrogateescape str 输入也保持原始字节。
     Verify lossless CMake round-trip for surrogateescaped str input.
     """
-    source = b'# byte: \xff\nproject(Demo)\n'
+    source = b"# byte: \xff\nproject(Demo)\n"
     text = source.decode("utf-8", errors="surrogateescape")
     document = CMakeDocument.parse(text)
     assert document.render_bytes() == source

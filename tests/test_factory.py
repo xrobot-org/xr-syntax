@@ -1,6 +1,7 @@
 """验证 CppFactory 生成的片段使用同一 parser-backed 语法模型。
 Test that CppFactory fragments use the same parser-backed syntax model.
 """
+
 from xr_syntax.cpp import CppFactory
 
 

@@ -16,6 +16,7 @@ from .parser import CMakeParser
 # 模块实现：提供 CMake 命令、注释和条件块的 parser-backed 片段工厂。
 # ---------------------------------------------------------------------------
 
+
 class CMakeFactory:
     """创建带 CMake 语言归属的 parser-backed 片段。
     Create parser-backed fragments carrying explicit CMake language provenance.
@@ -113,9 +114,7 @@ class CMakeFactory:
         Build unparsed source for one if()/endif() block.
         """
         opening = self._command_draft("if", condition).source
-        body_text = "\n".join(
-            self._source_of(item).rstrip("\r\n") for item in body
-        )
+        body_text = "\n".join(self._source_of(item).rstrip("\r\n") for item in body)
         rendered = [opening]
         if body_text:
             rendered.append(body_text)

@@ -90,6 +90,7 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
     """组合声明、declarator、表达式和区间解析阶段，构成原生 C++ 结构 parser。
     Combine declaration, declarator, expression, and range parsing stages into the native C++ structural parser.
     """
+
     def __init__(self, lexemes: Sequence[_Lexeme], diagnostics: Iterable[Diagnostic]) -> None:
         """保存词法结果并建立括号配对表。
         Store the lexing result and build delimiter-pair tables.
@@ -209,9 +210,7 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
                     previous -= 1
                 # 反斜杠续行仍属于同一条逻辑预处理指令，不能在物理换行处
                 # 提前结束，否则宏 body 会被误当成普通 translation-unit 源码。
-                continued = (
-                    previous >= start and self.lexemes[previous].text == "\\"
-                )
+                continued = previous >= start and self.lexemes[previous].text == "\\"
                 line_end += 1
                 if continued:
                     continue

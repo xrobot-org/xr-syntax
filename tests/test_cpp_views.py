@@ -1,6 +1,7 @@
 """验证 C++ 类型化视图对类、函数、参数、调用和变量的源码级解释。
 Test source-level C++ typed views for classes, functions, parameters, calls, includes, and variables.
 """
+
 from xr_syntax.cpp import CppDocument
 
 SOURCE = """class Example {
@@ -59,9 +60,7 @@ def test_template_parameter_views() -> None:
     """验证模板参数视图的名称、类型和默认值提取。
     Verify extraction of template-parameter names, types, and default values.
     """
-    document = CppDocument.parse(
-        "template <typename T, int N = 3, Foo V> class C {};"
-    )
+    document = CppDocument.parse("template <typename T, int N = 3, Foo V> class C {};")
     parameters = document.class_views("C")[0].template_parameters
     assert [parameter.name for parameter in parameters] == ["T", "N", "V"]
     assert [parameter.type for parameter in parameters] == ["typename", "int", "Foo"]
@@ -102,12 +101,12 @@ def test_include_and_variable_views_cover_file_and_function_scope() -> None:
     """
     document = CppDocument.parse(
         '#include "local.hpp"\n'
-        '#include <vector>\n'
-        'static int global_value = 3;\n'
-        'void f() {\n'
-        '  static Foo local = Foo(arg);\n'
-        '  auto& ref = global_value;\n'
-        '}\n'
+        "#include <vector>\n"
+        "static int global_value = 3;\n"
+        "void f() {\n"
+        "  static Foo local = Foo(arg);\n"
+        "  auto& ref = global_value;\n"
+        "}\n"
     )
 
     includes = document.include_views()

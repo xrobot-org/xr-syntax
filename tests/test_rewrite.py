@@ -1,6 +1,7 @@
 """验证不可变重写只重建修改路径，并复用未变化的 green 子树。
 Test immutable rewrites, including reuse of unchanged green subtrees.
 """
+
 from xr_syntax.cpp import CppDocument, CppFactory
 
 

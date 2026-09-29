@@ -16,6 +16,7 @@ from .lexer import _LITERAL_KINDS, _Lexer
 # 模块实现：提供带字符/字节位置的公共 C++ 词法 token 查询。
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class CppLexicalToken:
     """保存公共词法 token；start/end 为字符位置，span 为字节位置。

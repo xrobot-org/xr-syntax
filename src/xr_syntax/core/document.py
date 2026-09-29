@@ -17,10 +17,12 @@ from .tree import SyntaxTree
 # Language-neutral document facade
 # ---------------------------------------------------------------------------
 
+
 class SyntaxParserProtocol(Protocol):
     """规定 SyntaxDocument 所需的最小解析器接口。
     Minimal parser contract required by SyntaxDocument.
     """
+
     def parse(
         self,
         source: str | bytes,
@@ -40,6 +42,7 @@ class SyntaxDocument:
     """表示某一语言的不可变文档快照。
     Language-neutral immutable document facade over one SyntaxTree snapshot.
     """
+
     __slots__ = ("tree", "_parser")
 
     language: str
@@ -54,9 +57,7 @@ class SyntaxDocument:
         Bind a syntax tree, parser, and optional grammar into one immutable document snapshot.
         """
         if tree.language != self.language:
-            raise ValueError(
-                f"expected {self.language!r} syntax tree, got {tree.language!r}"
-            )
+            raise ValueError(f"expected {self.language!r} syntax tree, got {tree.language!r}")
         self.tree = tree
         self._parser = parser
 
@@ -97,6 +98,7 @@ class SyntaxDocument:
         if grammar is None or not isinstance(element, (SyntaxNode, SyntaxToken)):
             return None
         return grammar.node(element.kind, named=element.named)
+
     # 高层编辑后重新解析，刷新 field 和 diagnostics；底层 tree 仍可复用 green 子树。
     # High-level edits reparse to refresh fields and diagnostics; low-level edits still reuse green subtrees.
     def replace(
@@ -151,11 +153,7 @@ class SyntaxDocument:
         """只返回匹配 kind 的 SyntaxNode 节点。
         Return only matching SyntaxNode objects.
         """
-        return tuple(
-            element
-            for element in self.elements(kind)
-            if isinstance(element, SyntaxNode)
-        )
+        return tuple(element for element in self.elements(kind) if isinstance(element, SyntaxNode))
 
     def _reparse(self: DocumentT, source: bytes) -> DocumentT:
         # 在语言文档边界统一重新解析，确保 field、诊断和错误恢复结构始终

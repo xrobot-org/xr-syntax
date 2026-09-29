@@ -1,6 +1,7 @@
 """验证原生 C++ parser 的逐字节 round-trip 不变量及关键回归场景。
 Test the native C++ parser byte-for-byte round-trip invariant and key regression cases.
 """
+
 from xr_syntax.cpp import CppDocument
 
 

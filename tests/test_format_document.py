@@ -1,6 +1,7 @@
 """验证布局 IR 在可平铺和必须换行两种宽度条件下的行为。
 Test layout-IR behavior when groups fit on one line and when they must break.
 """
+
 from xr_syntax.format import Group, Indent, concat, join, line, render, softline
 
 
@@ -32,9 +33,4 @@ def test_group_breaks_when_needed() -> None:
     assert render(
         call_doc(["long_argument_a", "long_argument_b"]),
         width=20,
-    ) == (
-        "foo(\n"
-        "  long_argument_a,\n"
-        "  long_argument_b\n"
-        ")"
-    )
+    ) == ("foo(\n  long_argument_a,\n  long_argument_b\n)")

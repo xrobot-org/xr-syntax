@@ -130,10 +130,7 @@ def declaration_type_text(node: SyntaxNode) -> str | None:
         end = equal.span.start
 
     source = node.tree.render_bytes()
-    raw = (
-        source[node.span.start : name.span.start]
-        + source[name.span.end : end]
-    )
+    raw = source[node.span.start : name.span.start] + source[name.span.end : end]
     return decode_source(raw).strip()
 
 
@@ -151,8 +148,4 @@ def named_elements(node: SyntaxNode, kinds: set[str]) -> tuple[SyntaxElement, ..
     """返回给定元素后代中所有 named node/token。
     Collect descendants whose kind is present in the requested set.
     """
-    return tuple(
-        child
-        for child in node.descendants()
-        if child.kind in kinds
-    )
+    return tuple(child for child in node.descendants() if child.kind in kinds)

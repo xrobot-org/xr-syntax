@@ -1,6 +1,7 @@
 """批量扫描 CMake 文件并统计 parser 的无损 round-trip 和诊断结果。
 Batch-scan CMake files and report lossless parser round-trip and diagnostic results.
 """
+
 from __future__ import annotations
 
 import argparse

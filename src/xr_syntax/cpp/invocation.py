@@ -15,6 +15,7 @@ from .lexer import _Lexeme, _Lexer
 # 模块实现：提供宏式 NAME(...) invocation 的词法查询和逗号列表切分。
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class CppInvocationView:
     """表示指定名字的词法 invocation 及其精确源码实参。
@@ -79,16 +80,14 @@ def split_source_list(source: str, *, template_angles: bool = False) -> tuple[st
     significant = [item for item in lexemes if not item.trivia and item.kind != "comment"]
     if not significant:
         return ()
-    separators, balanced = _top_level_commas(
-        significant, template_angles=template_angles
-    )
+    separators, balanced = _top_level_commas(significant, template_angles=template_angles)
     if not balanced:
         raise ValueError("unbalanced C++ source list")
     encoded = source.encode("utf-8", errors="surrogateescape")
     result = []
     start = 0
     for item in separators:
-        text = decode_source(encoded[start:item.start]).strip()
+        text = decode_source(encoded[start : item.start]).strip()
         if not text:
             raise ValueError("empty argument in C++ source list")
         result.append(text)
@@ -110,20 +109,14 @@ def identifier_occurrences(source: str) -> tuple[CppIdentifierOccurrence, ...]:
     significant = [
         (index, item)
         for index, item in enumerate(lexemes)
-        if not item.trivia
-        and item.kind != "comment"
-        and not _inside_preprocessor(lexemes, index)
+        if not item.trivia and item.kind != "comment" and not _inside_preprocessor(lexemes, index)
     ]
     result = []
     for position, (_, item) in enumerate(significant):
         if item.kind != "identifier":
             continue
         previous = significant[position - 1][1].text if position else None
-        following = (
-            significant[position + 1][1].text
-            if position + 1 < len(significant)
-            else None
-        )
+        following = significant[position + 1][1].text if position + 1 < len(significant) else None
         result.append(
             CppIdentifierOccurrence(
                 item.text, SourceSpan(item.start, item.end), previous, following
@@ -170,9 +163,7 @@ def find_invocations(
         closing = lexemes[close_index]
         inner = decode_source(encoded[opening.end : closing.start])
         arguments = (
-            split_source_list(inner, template_angles=template_angles)
-            if inner.strip()
-            else ()
+            split_source_list(inner, template_angles=template_angles) if inner.strip() else ()
         )
         result.append(
             CppInvocationView(
@@ -229,11 +220,7 @@ def _top_level_commas(
             brace_depth += 1
         elif text == "}":
             brace_depth = max(0, brace_depth - 1)
-        elif (
-            template_angles
-            and text == "<"
-            and not (round_depth or square_depth or brace_depth)
-        ):
+        elif template_angles and text == "<" and not (round_depth or square_depth or brace_depth):
             angle_depth += 1
         elif template_angles and text == ">" and angle_depth:
             angle_depth -= 1

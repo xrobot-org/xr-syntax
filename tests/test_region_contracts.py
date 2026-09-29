@@ -132,11 +132,7 @@ def test_unmatched_markers_do_not_create_regions() -> None:
     """单独 Begin 或 End 不产生伪 region。
     Unmatched Begin or End markers do not produce synthetic regions.
     """
-    source = (
-        "/* User Code End orphan */\n"
-        "/* User Code Begin open */\n"
-        "work();\n"
-    )
+    source = "/* User Code End orphan */\n/* User Code Begin open */\nwork();\n"
     assert CppDocument.parse(source).user_regions() == ()
 
 
@@ -159,11 +155,7 @@ def test_region_roundtrip_preserves_non_utf8_body_bytes() -> None:
     """surrogateescape body_text 可原样写回非 UTF-8 字节。
     A surrogate-escaped body can be written back without changing non-UTF-8 bytes.
     """
-    source = (
-        b"/* User Code Begin raw */\n"
-        b"\xff\xfe\n"
-        b"/* User Code End raw */\n"
-    )
+    source = b"/* User Code Begin raw */\n\xff\xfe\n/* User Code End raw */\n"
     document = CppDocument.parse(source)
     region = document.user_regions()[0]
     changed = document.replace_region_body(region, region.body_text)

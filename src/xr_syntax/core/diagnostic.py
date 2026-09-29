@@ -12,11 +12,13 @@ from .span import SourcePoint, SourceSpan
 # 模块实现：定义附着在不可变语法快照上的解析诊断数据结构。
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class Diagnostic:
     """表示一条绑定到源码字节范围的 parser 诊断。
     Describe one parser diagnostic anchored to a byte span.
     """
+
     message: str
     span: SourceSpan
     start_point: SourcePoint | None = None

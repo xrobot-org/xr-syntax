@@ -25,6 +25,7 @@ from .parser import CppParser
 # 模块实现：提供常见 C++ 源码片段的 parser-backed 工厂。
 # ---------------------------------------------------------------------------
 
+
 # Factory 同时提供两类能力：公开方法返回已解析、可安全插入的 SyntaxFragment；
 # 私有 *_draft 方法只负责低成本地产生源码文本，供 Builder 批量拼装后统一 parse。
 class CppFactory:

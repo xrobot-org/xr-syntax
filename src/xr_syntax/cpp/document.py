@@ -33,11 +33,13 @@ from .view import (
 # Protected source regions
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class CppRegion:
     """表示由成对标记界定的源码保护区域，例如 User Code、clang-format 或 NOLINT。
     Paired source-marker region such as User Code, clang-format or NOLINT.
     """
+
     kind: str
     name: str | None
     begin: SyntaxElement
@@ -51,10 +53,12 @@ class CppRegion:
 # C++ document queries
 # ---------------------------------------------------------------------------
 
+
 class CppDocument(SyntaxDocument):
     """在完整 C++ 语法树之上提供高层文档能力。
     C++-specific query/edit facade over the complete generic syntax tree.
     """
+
     __slots__ = ()
 
     language = "cpp"
@@ -108,11 +112,7 @@ class CppDocument(SyntaxDocument):
         source = self.render_bytes()
         self._validate_region(region, len(source))
         replacement = encode_source(body)
-        changed = (
-            source[: region.body_span.start]
-            + replacement
-            + source[region.body_span.end :]
-        )
+        changed = source[: region.body_span.start] + replacement + source[region.body_span.end :]
         return self._reparse(changed)
 
     def _validate_region(self, region: CppRegion, source_size: int) -> None:
@@ -264,6 +264,7 @@ class CppDocument(SyntaxDocument):
             begin=re.compile(r"//\s*NOLINTBEGIN\b"),
             end=re.compile(r"//\s*NOLINTEND\b"),
         )
+
     # 区域标记由普通 C++ 注释配对得到，实现在 document 层。
     # Region markers are paired from ordinary C++ comments at the document layer.
     def _paired_comment_regions(

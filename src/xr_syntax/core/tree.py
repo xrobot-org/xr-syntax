@@ -17,11 +17,13 @@ from .text import encode_source
 # SyntaxTree 快照与 persistent green-tree 编辑
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class SyntaxTree:
     """保存某一语言不可变语法快照的核心状态。
     Immutable language syntax snapshot backed by a green root.
     """
+
     language: str
     green_root: GreenNode
     diagnostics: tuple[Diagnostic, ...] | None = ()
@@ -106,9 +108,7 @@ class SyntaxTree:
         additions: list[GreenElement] = [green]
         if separator:
             additions.append(GreenTrivia("raw", separator))
-        return self._with_root(
-            _insert_at(self.green_root, target.path, additions, before=True)
-        )
+        return self._with_root(_insert_at(self.green_root, target.path, additions, before=True))
 
     def insert_after(
         self,
@@ -128,9 +128,7 @@ class SyntaxTree:
         if separator:
             additions.append(GreenTrivia("raw", separator))
         additions.append(green)
-        return self._with_root(
-            _insert_at(self.green_root, target.path, additions, before=False)
-        )
+        return self._with_root(_insert_at(self.green_root, target.path, additions, before=False))
 
     def _check_target(self, target: SyntaxElement) -> None:
         """确认待编辑 red 元素属于当前 SyntaxTree 快照。
@@ -175,6 +173,7 @@ class SyntaxTree:
 # ---------------------------------------------------------------------------
 # 结构路径递归操作：只处理 green tree，不触碰 parser/diagnostic
 # ---------------------------------------------------------------------------
+
 
 def _replace_at(
     root: GreenNode,

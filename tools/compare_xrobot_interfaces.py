@@ -102,9 +102,7 @@ def compare_header(header: Path) -> dict[str, object]:
     ]
     result["application_constructor_candidates"] = candidates
 
-    constructor_match = any(
-        extra_count == len(constructor_args) for _, extra_count in candidates
-    )
+    constructor_match = any(extra_count == len(constructor_args) for _, extra_count in candidates)
     template_match = len(class_view.template_parameters) == len(template_args)
     result["constructor_count_match"] = constructor_match
     result["template_count_match"] = template_match
@@ -113,9 +111,7 @@ def compare_header(header: Path) -> dict[str, object]:
         result["status"] = "match"
     else:
         result["status"] = "mismatch"
-        result["reason"] = (
-            "constructor-count" if not constructor_match else "template-count"
-        )
+        result["reason"] = "constructor-count" if not constructor_match else "template-count"
     return result
 
 
@@ -123,9 +119,7 @@ def compare_modules(root: Path) -> dict[str, object]:
     """比较目录中的全部主模块头文件并汇总结果。
     Compare every primary module header below a directory and summarize the results.
     """
-    rows: list[dict[str, object]] = [
-        compare_header(header) for header in _primary_headers(root)
-    ]
+    rows: list[dict[str, object]] = [compare_header(header) for header in _primary_headers(root)]
     mismatches = [row for row in rows if row["status"] == "mismatch"]
     skipped = [row for row in rows if str(row["status"]).startswith("skipped-")]
     matches = [row for row in rows if row["status"] == "match"]

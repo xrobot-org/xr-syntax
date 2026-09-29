@@ -40,9 +40,7 @@ def _python_files(root: Path) -> list[Path]:
         if not base.exists():
             continue
         files.extend(
-            path
-            for path in base.rglob("*.py")
-            if not any(part in _SKIP for part in path.parts)
+            path for path in base.rglob("*.py") if not any(part in _SKIP for part in path.parts)
         )
     return sorted(files)
 
