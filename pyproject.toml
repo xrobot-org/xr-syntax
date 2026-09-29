@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "xr-syntax"
 version = "0.2.0"
 description = "Structured C++ and CMake parsing, rewriting, and code generation for XRobot tooling."
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 authors = [
     {name = "Xiao", email = "2592509183@qq.com"}
 ]
@@ -21,12 +21,11 @@ dependencies = []
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
     "Typing :: Typed",
@@ -61,13 +60,13 @@ addopts = "-q"
 
 [tool.ruff]
 line-length = 100
-target-version = "py38"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
-ignore = ["E501", "UP006", "UP045"]
+ignore = ["E501"]
 
 [tool.mypy]
-python_version = "3.8"
+python_version = "3.10"
 strict = true
 packages = ["xr_syntax"]

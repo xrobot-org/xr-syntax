@@ -26,7 +26,7 @@ assert document.render_bytes() == source
 
 ## 安装
 
-支持 Python 3.8–3.13，与 XRobot 和 LibXR_CppCodeGenerator 的 Python 包保持一致。
+支持 Python 3.10–3.14，与 XRobot 和 LibXR_CppCodeGenerator 的 Python 包保持一致。
 
 ```bash
 pip install xr-syntax
@@ -553,12 +553,11 @@ IfBreak
 与 XRobot、LibXR_CppCodeGenerator 保持一致：
 
 ```text
-Python 3.8
-Python 3.9
 Python 3.10
 Python 3.11
 Python 3.12
 Python 3.13
+Python 3.14
 ```
 
 CI 在 Linux 和 Windows 上覆盖以上版本。
@@ -589,7 +588,7 @@ tools/check_bilingual_docs.py
 当前验证包括：
 
 - Linux / Windows；
-- Python 3.8–3.13；
+- Python 3.10–3.14；
 - pytest；
 - ruff；
 - mypy strict；
