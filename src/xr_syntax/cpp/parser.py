@@ -70,18 +70,28 @@ class CppParser:
         """解析源码并保证结果可逐字节还原。
         Parse source text or bytes into the corresponding immutable syntax representation.
         """
+        return self._parse_lexed(source, source_name)[0]
+
+    def _parse_lexed(
+        self, source: str | bytes, source_name: str | None
+    ) -> tuple[SyntaxTree, tuple[list[_Lexeme], list[Diagnostic]]]:
+        """解析源码，同时返回词法结果（lexeme 和 lexer 诊断），供文档复用。
+        Parse source and also return the lexing result (lexemes and lexer diagnostics) for
+        the document to reuse.
+        """
         data = encode_source(source) if isinstance(source, str) else bytes(source)
         text = decode_source(data)
         # Lexer 负责 source-preserving lexeme 与基础诊断；StructuralParser
         # 只在 lexeme 范围上建立结构，不再重新切原始字符串。
         lexer = _Lexer(text)
         lexemes, diagnostics = lexer.scan()
+        lexed = (lexemes, list(diagnostics))
         parser = _StructuralParser(lexemes, diagnostics)
         root = parser.parse_translation_unit()
         tree = SyntaxTree("cpp", root, tuple(parser.diagnostics), source_name)
         if tree.render_bytes() != data:
             raise AssertionError("native C++ parser 破坏了 lossless round-trip 不变量")
-        return tree
+        return tree, lexed
 
 
 # 结构层拆成 declaration / declarator / expression / range 四个 mixin；

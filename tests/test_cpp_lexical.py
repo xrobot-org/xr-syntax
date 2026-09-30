@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import pytest
 
-from xr_syntax.cpp import code_tokens, matching_delimiter
+from xr_syntax.cpp import CppDocument, code_tokens, identifier_occurrences, matching_delimiter
 
 
 def test_code_tokens_keep_character_and_byte_offsets_distinct() -> None:
@@ -76,3 +76,18 @@ def test_matching_delimiter_reports_invalid_or_unclosed_input() -> None:
         matching_delimiter(tokens, 0)
     with pytest.raises(ValueError, match="Unclosed delimiter"):
         matching_delimiter(tokens, 1)
+
+
+def test_document_queries_reuse_the_lexing_of_the_parse() -> None:
+    """验证文档的 code token 和 identifier 与按源码重新切分的结果相同，编辑后的文档同样如此。
+    Verify a document's code tokens and identifiers equal those of lexing its source again,
+    also for a document produced by an edit.
+    """
+    source = '#define A 1\nint /* é */ value = f("x");\n'
+    document = CppDocument.parse(source)
+    assert document.code_tokens() == code_tokens(source)
+    assert document.identifier_occurrences() == identifier_occurrences(source)
+    edited = document.remove(document.root.first_descendant("comment"))
+    assert edited.code_tokens() == code_tokens(edited.render())
+    with pytest.raises(ValueError, match="未闭合"):
+        CppDocument.parse("int x; /* open").code_tokens()

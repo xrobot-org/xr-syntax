@@ -4,6 +4,7 @@ Lexical queries for macro-like NAME(...) invocations and comma-delimited source 
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from xr_syntax.core import SourceSpan, SyntaxTree, decode_source
@@ -106,6 +107,16 @@ def identifier_occurrences(source: str) -> tuple[CppIdentifierOccurrence, ...]:
     lexemes, diagnostics = _Lexer(source).scan()
     if diagnostics:
         raise ValueError(diagnostics[0].message)
+    return _identifier_occurrences_of(lexemes)
+
+
+def _identifier_occurrences_of(
+    lexemes: Sequence[_Lexeme],
+) -> tuple[CppIdentifierOccurrence, ...]:
+    """lexeme 序列中的 identifier occurrence，忽略注释和预处理逻辑行。
+    The identifier occurrences of a lexeme sequence outside comments and preprocessor
+    logical lines.
+    """
     directives = _preprocessor_mask(lexemes)
     significant = [
         (index, item)
@@ -133,12 +144,17 @@ def find_invocations(
     name: str,
     *,
     template_angles: bool = False,
+    lexemes: Sequence[_Lexeme] | None = None,
 ) -> tuple[CppInvocationView, ...]:
     """在语法快照中查找指定 NAME(...) invocation。
     Find lexical NAME(...) invocations in one syntax-tree snapshot.
+
+    Args:
+        lexemes: tree 源码的 lexeme；没有时重新切分。
+            The lexemes of the tree's source; the source is lexed again without them.
     """
-    text = tree.render()
-    lexemes, _ = _Lexer(text).scan()
+    if lexemes is None:
+        lexemes, _ = _Lexer(tree.render()).scan()
     significant = [
         (index, item)
         for index, item in enumerate(lexemes)
@@ -178,7 +194,7 @@ def find_invocations(
     return tuple(result)
 
 
-def _matching_paren(lexemes: list[_Lexeme], opening: int) -> int | None:
+def _matching_paren(lexemes: Sequence[_Lexeme], opening: int) -> int | None:
     """匹配词法 invocation 的外层圆括号。
     Match the outer parenthesis of a lexical invocation.
     """
