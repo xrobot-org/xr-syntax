@@ -5,6 +5,7 @@ Test how the output language is chosen, message selection and argparse text tran
 from __future__ import annotations
 
 import argparse
+import sys
 
 import pytest
 
@@ -53,14 +54,26 @@ def test_argparse_texts_are_translated_in_chinese(monkeypatch: pytest.MonkeyPatc
         A parser with one positional argument; titles and help take the current language
         when it is created.
         """
-        result = argparse.ArgumentParser(prog="tool")
+        result = argparse.ArgumentParser(
+            prog="tool", formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        )
         result.add_argument("name")
+        result.add_argument("--count", default=1, help="repeat")
         return result
 
-    assert parser().format_help().startswith("usage: tool [-h] name\n")
+    help_text = parser().format_help()
+    assert help_text.startswith("usage: tool [-h] [--count COUNT] name\n")
+    assert "repeat (default: 1)" in help_text
     monkeypatch.setenv("XR_LANG", "zh")
     help_text = parser().format_help()
-    assert help_text.startswith("用法：tool [-h] name\n")
-    assert "位置参数：" in help_text and "显示帮助并退出" in help_text
+    assert help_text.startswith("用法：tool [-h] [--count COUNT] name\n")
+    # Python 3.10 的 argparse 自己拼标题后的冒号和默认值说明，不经过 gettext，所以这两处在
+    # 3.10 上保持英文；3.11 起都会翻译。
+    # Python 3.10's argparse appends the colon after headings and the default-value note itself,
+    # not through gettext, so these two stay English on 3.10; from 3.11 on both are translated.
+    translated = sys.version_info >= (3, 11)
+    assert ("位置参数：" if translated else "位置参数:") in help_text
+    assert "显示帮助并退出" in help_text
+    assert ("repeat（默认：1）" if translated else "repeat (default: 1)") in help_text
     with pytest.raises(SystemExit):
         parser().parse_args([])

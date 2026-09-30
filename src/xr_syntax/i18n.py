@@ -65,6 +65,7 @@ _ARGPARSE = {
     "%(heading)s:": "%(heading)s：",
     "show this help message and exit": "显示帮助并退出",
     "show program's version number and exit": "显示版本号并退出",
+    " (default: %(default)s)": "（默认：%(default)s）",
     "the following arguments are required: %s": "缺少必需的参数：%s",
     "one of the arguments %s is required": "必须提供以下参数之一：%s",
     "unrecognized arguments: %s": "无法识别的参数：%s",
