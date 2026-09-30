@@ -22,6 +22,7 @@ from xr_syntax.core import (
     decode_source,
     encode_source,
 )
+from xr_syntax.i18n import tr
 
 from .grammar import CMAKE_GRAMMAR
 
@@ -177,7 +178,9 @@ class _CMakeStructuralParser:
 
         close = self._matching_paren(cursor)
         if close is None:
-            self._diagnose("unterminated CMake command", cursor, self.length)
+            self._diagnose(
+                tr("unterminated CMake command", "CMake 命令没有结束"), cursor, self.length
+            )
             close = self.length - 1 if self.length else cursor
             end = self.length
             closed = False
@@ -284,7 +287,7 @@ class _CMakeStructuralParser:
             if self.text[cursor] == '"':
                 return cursor + 1
             cursor += 1
-        self._diagnose("unterminated quoted argument", start, self.length)
+        self._diagnose(tr("unterminated quoted argument", "引号参数没有结束"), start, self.length)
         return self.length
 
     def _bracket_end(self, start: int, limit: int | None = None) -> int | None:
@@ -303,7 +306,7 @@ class _CMakeStructuralParser:
         closing = "]" + ("=" * marks) + "]"
         found = self.text.find(closing, cursor + 1, end)
         if found < 0:
-            self._diagnose("unterminated bracket argument", start, end)
+            self._diagnose(tr("unterminated bracket argument", "括号参数没有结束"), start, end)
             return end
         return found + len(closing)
 
@@ -369,7 +372,7 @@ class _CMakeStructuralParser:
             if close_index >= len(children):
                 output.append(child)
                 output.extend(inner)
-                self._diagnose("unterminated CMake block", 0, 0)
+                self._diagnose(tr("unterminated CMake block", "CMake 块没有结束"), 0, 0)
                 return output, close_index
             grouped = [child, *inner, children[close_index]]
             output.append(GreenChild(GreenNode(kind, tuple(grouped), named=True)))

@@ -9,6 +9,7 @@ from typing import NamedTuple
 
 from xr_syntax.core import Diagnostic, GreenElement, SourceSpan
 from xr_syntax.core.green import _token, _trivia
+from xr_syntax.i18n import tr
 
 # C++ punctuator 采用最长匹配。模板中的 >> 在 parser 的角括号匹配阶段按两个 > 处理。
 # Use longest-match C++ punctuators; template `>>` is split logically into two
@@ -279,7 +280,11 @@ class _Lexer:
                 end = length if close < 0 else close + 2
                 emit("comment", index, end, named=True)
                 if close < 0:
-                    self._diagnostic("未闭合的块注释", self._result[-1].start, self._result[-1].end)
+                    self._diagnostic(
+                        tr("unclosed block comment", "未闭合的块注释"),
+                        self._result[-1].start,
+                        self._result[-1].end,
+                    )
             elif branch == "literal":
                 end = self._scan_literal(index, found.group())
             else:
@@ -301,20 +306,31 @@ class _Lexer:
             paren = text.find("(", index)
             if paren < 0 or paren - index > 16:
                 self._emit(kind, start, length, named=True)
-                self._diagnostic("非法或未闭合的 raw string delimiter", *self._last_span())
+                self._diagnostic(
+                    tr(
+                        "invalid or unclosed raw string delimiter",
+                        "原始字符串的分隔符无效或未闭合",
+                    ),
+                    *self._last_span(),
+                )
                 return length
             close_text = ")" + text[index:paren] + '"'
             close = text.find(close_text, paren + 1)
             if close < 0:
                 self._emit(kind, start, length, named=True)
-                self._diagnostic("未闭合的 raw string", *self._last_span())
+                self._diagnostic(
+                    tr("unclosed raw string", "未闭合的原始字符串"), *self._last_span()
+                )
                 return length
             index = close + len(close_text)
         else:
             closing = _ESCAPED_STRING[quote].match(text, index)
             if closing is None:
                 self._emit(kind, start, length, named=True)
-                self._diagnostic("未闭合的字符串或字符字面量", *self._last_span())
+                self._diagnostic(
+                    tr("unclosed string or character literal", "未闭合的字符串或字符字面量"),
+                    *self._last_span(),
+                )
                 return length
             index = closing.end()
         # 用户定义字面量的后缀属于同一个 token。

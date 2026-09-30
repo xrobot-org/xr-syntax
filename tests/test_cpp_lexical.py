@@ -72,9 +72,9 @@ def test_matching_delimiter_reports_invalid_or_unclosed_input() -> None:
     Verify errors for invalid openings and unclosed delimiters.
     """
     tokens = code_tokens("f(a")
-    with pytest.raises(ValueError, match="Expected opening"):
+    with pytest.raises(ValueError, match="^expected an opening delimiter$"):
         matching_delimiter(tokens, 0)
-    with pytest.raises(ValueError, match="Unclosed delimiter"):
+    with pytest.raises(ValueError, match="^unclosed delimiter at offset 1$"):
         matching_delimiter(tokens, 1)
 
 
@@ -89,5 +89,5 @@ def test_document_queries_reuse_the_lexing_of_the_parse() -> None:
     assert document.identifier_occurrences() == identifier_occurrences(source)
     edited = document.remove(document.root.first_descendant("comment"))
     assert edited.code_tokens() == code_tokens(edited.render())
-    with pytest.raises(ValueError, match="未闭合"):
+    with pytest.raises(ValueError, match="^unclosed block comment$"):
         CppDocument.parse("int x; /* open").code_tokens()

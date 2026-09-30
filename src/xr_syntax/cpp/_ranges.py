@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 from xr_syntax.core import Diagnostic, GreenChild, GreenElement, GreenNode, SourcePoint, SourceSpan
 from xr_syntax.core.green import _child, _node
+from xr_syntax.i18n import tr
 
 from ._support import _ParserSupport
 from .lexer import _BINARY_PRECEDENCE, _CONTROL
@@ -244,7 +245,11 @@ class _RangeMixin(_ParserSupport):
                 depth -= 2
             if depth <= 0:
                 return index
-        self._diagnostic("未闭合的模板参数列表", opening, min(opening + 1, end))
+        self._diagnostic(
+            tr("unclosed template argument list", "未闭合的模板参数列表"),
+            opening,
+            min(opening + 1, end),
+        )
         return None
 
     def _enclosing_open(self, index: int, token: str, lower_bound: int) -> int | None:

@@ -8,6 +8,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from xr_syntax.core import SourceSpan
+from xr_syntax.i18n import tr
 
 from ._lexical_support import _preprocessor_mask
 from .lexer import _LITERAL_KINDS, _Lexeme, _Lexer
@@ -73,7 +74,7 @@ def matching_delimiter(tokens: Sequence[CppLexicalToken], start: int) -> int:
     pairs = {"(": ")", "[": "]", "{": "}", "<": ">"}
     expected = pairs.get(tokens[start].text)
     if expected is None:
-        raise ValueError("Expected opening delimiter")
+        raise ValueError(tr("expected an opening delimiter", "这里应当是左括号"))
     stack = [expected]
     for index in range(start + 1, len(tokens)):
         token = tokens[index]
@@ -94,7 +95,12 @@ def matching_delimiter(tokens: Sequence[CppLexicalToken], start: int) -> int:
             stack.pop()
             if not stack:
                 return index
-    raise ValueError(f"Unclosed delimiter at offset {tokens[start].start}")
+    raise ValueError(
+        tr(
+            f"unclosed delimiter at offset {tokens[start].start}",
+            f"位置 {tokens[start].start} 处的括号没有闭合",
+        )
+    )
 
 
 def _public_kind(kind: str) -> str:

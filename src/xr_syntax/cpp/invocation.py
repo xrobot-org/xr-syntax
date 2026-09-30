@@ -8,6 +8,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from xr_syntax.core import SourceSpan, SyntaxTree, decode_source
+from xr_syntax.i18n import tr
 
 from ._lexical_support import _preprocessor_mask
 from .lexer import _Lexeme, _Lexer
@@ -83,19 +84,19 @@ def split_source_list(source: str, *, template_angles: bool = False) -> tuple[st
         return ()
     separators, balanced = _top_level_commas(significant, template_angles=template_angles)
     if not balanced:
-        raise ValueError("unbalanced C++ source list")
+        raise ValueError(tr("unbalanced C++ source list", "C++ 列表的括号不配对"))
     encoded = source.encode("utf-8", errors="surrogateescape")
     result = []
     start = 0
     for item in separators:
         text = decode_source(encoded[start : item.start]).strip()
         if not text:
-            raise ValueError("empty argument in C++ source list")
+            raise ValueError(tr("empty argument in C++ source list", "C++ 列表中有空的一项"))
         result.append(text)
         start = item.end
     text = decode_source(encoded[start:]).strip()
     if not text:
-        raise ValueError("empty argument in C++ source list")
+        raise ValueError(tr("empty argument in C++ source list", "C++ 列表中有空的一项"))
     result.append(text)
     return tuple(result)
 

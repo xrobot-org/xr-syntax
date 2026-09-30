@@ -17,6 +17,7 @@ from xr_syntax.core import (
     decode_source,
     encode_source,
 )
+from xr_syntax.i18n import tr
 
 from ._declaration import _DeclarationMixin
 from ._declarator import _DeclaratorMixin
@@ -91,7 +92,12 @@ class CppParser:
         root = parser.parse_translation_unit()
         tree = SyntaxTree("cpp", root, tuple(parser.diagnostics), source_name)
         if tree.render_bytes() != data:
-            raise AssertionError("native C++ parser 破坏了 lossless round-trip 不变量")
+            raise AssertionError(
+                tr(
+                    "the C++ parser did not reproduce the source byte for byte",
+                    "C++ 解析结果没有逐字节还原源码",
+                )
+            )
         return tree, lexed
 
 
@@ -135,13 +141,15 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
                 stack.append((text, index))
             elif text in closes:
                 if not stack or stack[-1][0] != closes[text]:
-                    self._diagnostic("不匹配的闭合符号", index, index + 1)
+                    self._diagnostic(
+                        tr("unmatched closing delimiter", "不匹配的闭合符号"), index, index + 1
+                    )
                     continue
                 _, opening = stack.pop()
                 self._pairs[opening] = index
                 self._reverse_pairs[index] = opening
         for _, opening in stack:
-            self._diagnostic("未闭合的分隔符", opening, opening + 1)
+            self._diagnostic(tr("unclosed delimiter", "未闭合的分隔符"), opening, opening + 1)
 
     def _parse_scope(self, start: int, end: int, *, context: str) -> list[_Replacement]:
         """按顶层语句/声明边界解析一个连续作用域。
