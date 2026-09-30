@@ -156,7 +156,12 @@ class _DeclarationMixin(_ParserSupport):
         Parse a function parameter list while preserving commas and whitespace.
         """
         replacements: list[_Replacement] = []
-        for part_start, part_end in self._split_top_level(open_paren + 1, close_paren, ","):
+        # 参数类型中的模板实参含有逗号（std::pair<int, float> p），尖括号按嵌套处理。
+        # Template arguments in parameter types contain commas (std::pair<int, float> p), so
+        # angle brackets nest.
+        for part_start, part_end in self._split_top_level(
+            open_paren + 1, close_paren, ",", angle_brackets=True
+        ):
             if self._next_significant(part_start, part_end) is None:
                 continue
             parameter = self._parse_parameter(part_start, part_end, template=False)

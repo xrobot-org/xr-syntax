@@ -171,3 +171,49 @@ def test_class_name_after_attributes() -> None:
     )
     names = {view.name for view in CppDocument.parse(source).class_views()}
     assert names == {"Packed", "Aligned", "GnuPacked", "Final", None}
+
+
+def test_a_keyword_that_does_not_start_a_definition_is_no_class() -> None:
+    """验证前向声明、详细类型说明符和返回 struct 的函数不会吞掉后面的类或成为类。
+    Verify that forward declarations, elaborated type specifiers and functions returning a
+    struct neither swallow a later class nor become classes.
+    """
+    source = (
+        "class Forward;\n"
+        "class Forward* pointer = nullptr;\n"
+        "struct stat info;\n"
+        "struct Result make() { return {}; }\n"
+        "class EXPORT_API Led final : public Base<(1)> { public: Led(int a) {} };\n"
+    )
+    document = CppDocument.parse(source)
+    assert [
+        (node.kind, view.name)
+        for node, view in zip(document.classes(), document.class_views(), strict=True)
+    ] == [("class_specifier", "Led")]
+    assert [f.name for f in document.class_views("Led")[0].constructors()] == ["Led"]
+
+
+def test_an_out_of_line_nested_class_keeps_its_qualified_name() -> None:
+    """验证类外定义的嵌套类以完整限定名出现，不会被当成外层类。
+    Verify that a nested class defined outside its enclosing class has its qualified name
+    and is not taken for the enclosing class.
+    """
+    document = CppDocument.parse("class Outer { class Inner; };\nclass Outer::Inner { int a; };\n")
+    assert [view.name for view in document.class_views()] == ["Outer", "Outer::Inner"]
+    assert [view.name for view in document.class_views("Outer")] == ["Outer"]
+
+
+def test_parameter_types_keep_template_argument_commas() -> None:
+    """验证参数类型中模板实参的逗号不会切开参数。
+    Verify that commas between template arguments in parameter types do not split parameters.
+    """
+    document = CppDocument.parse(
+        "class Led { public: Led(std::pair<int, float> p, A<B<int, int>, C> x, "
+        "int y = f(1, 2)) {} };"
+    )
+    constructor = document.class_views("Led")[0].constructors()[0]
+    assert [item.text.strip() for item in constructor.parameters] == [
+        "std::pair<int, float> p",
+        "A<B<int, int>, C> x",
+        "int y = f(1, 2)",
+    ]

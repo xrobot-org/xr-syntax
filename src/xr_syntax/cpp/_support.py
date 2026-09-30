@@ -52,9 +52,12 @@ class _ParserSupport:
         start: int,
         end: int,
         separator: str,
+        *,
+        angle_brackets: bool = False,
     ) -> list[tuple[int, int]]:
-        """按不位于嵌套分隔符内的 separator 拆分区间。
-        Split a source range on separators that are not nested inside (), [], or {}.
+        """按不位于嵌套分隔符内的 separator 拆分区间；angle_brackets 时模板尖括号也算嵌套。
+        Split a source range on separators that are not nested inside (), [] or {}, and with
+        angle_brackets also not inside template angle brackets.
         """
         raise NotImplementedError
 

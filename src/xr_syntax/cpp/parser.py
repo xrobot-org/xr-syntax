@@ -8,6 +8,7 @@ from collections.abc import Iterable, Sequence
 
 from xr_syntax.core import (
     Diagnostic,
+    GreenElement,
     GreenNode,
     GreenToken,
     ParserKindInfo,
@@ -320,17 +321,16 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
         )
 
     def _parse_class(self, start: int, end: int) -> _Replacement | None:
-        """解析 class/struct/union 定义并递归解析成员列表。
-        Parse a class/struct/union definition and recursively parse its member list.
+        """解析 class/struct/union 定义并递归解析成员列表；不是定义时返回 None。
+        Parse a class/struct/union definition and recursively parse its member list; None when
+        the keyword does not start a definition.
         """
         keyword = self.lexemes[start].text
-        significant = self._significant(start + 1, end)
-        name_index = self._class_head_name(significant)
-        open_brace = next(
-            (index for index in significant if self.lexemes[index].text == "{"),
-            None,
-        )
-        if open_brace is None or open_brace not in self._pairs:
+        head = self._class_head(self._significant(start + 1, end))
+        if head is None:
+            return None
+        name, open_brace = head
+        if open_brace not in self._pairs:
             return None
         close_brace = self._pairs[open_brace]
         if close_brace >= end:
@@ -344,15 +344,14 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
             body_replacements,
         )
         replacements = [_Replacement(open_brace, close_brace + 1, body, "body")]
-        if name_index is not None and name_index < open_brace:
-            replacements.append(
-                _Replacement(
-                    name_index,
-                    name_index + 1,
-                    GreenToken("type_identifier", self.lexemes[name_index].text, named=True),
-                    "name",
-                )
+        if name is not None:
+            first, last = name
+            element: GreenElement = (
+                GreenToken("type_identifier", self.lexemes[first].text, named=True)
+                if first == last
+                else self._compose("qualified_identifier", first, last + 1, [])
             )
+            replacements.append(_Replacement(first, last + 1, element, "name"))
         kind = {
             "class": "class_specifier",
             "struct": "struct_specifier",
@@ -366,19 +365,89 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
         # specifier to preserve compatibility with the existing views.
         return _Replacement(start, class_end, node)
 
-    def _class_head_name(self, significant: list[int]) -> int | None:
-        """跳过 class-head 中的属性说明，返回类名 token 下标。
-        Return the class-name token of a class head, skipping ``[[...]]``,
-        ``alignas(...)``, ``__attribute__((...))`` and ``__declspec(...)``.
+    def _class_head(self, significant: list[int]) -> tuple[tuple[int, int] | None, int] | None:
+        """识别类头：属性、可带 :: 限定和模板实参的类名（名前的宏名跳过）、final、基类列表，
+        直到类体的 {。不是类定义（前向声明、详细类型说明符、函数）时返回 None。
+        Recognize a class head: attributes, a class name that may be ::-qualified and carry
+        template arguments (macro names before it are skipped), final and a base clause, up to
+        the { of the body. None when the keyword does not start a definition (a forward
+        declaration, an elaborated type specifier, a function).
+
+        Returns:
+            ((类名第一个 token, 最后一个 token) 或匿名类为 None, 类体 { 的下标)。
+            ((first token, last token) of the class name, or None for an anonymous class,
+            index of the body's {).
         """
-        position = 0
+        position = self._skip_class_attributes(significant, 0)
+        name: tuple[int, int] | None = None
         while position < len(significant):
             index = significant[position]
             lexeme = self.lexemes[index]
-            if lexeme.text in ("{", ":"):
+            if lexeme.kind != "identifier" or lexeme.text == "final":
+                break
+            # 名字序列：identifier (<...>)? (:: identifier (<...>)?)*；最后一段才是类名。
+            # A name sequence: identifier (<...>)? (:: identifier (<...>)?)*.
+            first = last = index
+            position += 1
+            while position < len(significant):
+                following = self.lexemes[significant[position]]
+                if following.text == "<":
+                    closing = self._match_angle(significant[position], significant[-1] + 1)
+                    if closing is None:
+                        return None
+                    while position < len(significant) and significant[position] <= closing:
+                        position += 1
+                    continue
+                if (
+                    following.text == "::"
+                    and position + 1 < len(significant)
+                    and self.lexemes[significant[position + 1]].kind == "identifier"
+                ):
+                    last = significant[position + 1]
+                    position += 2
+                    continue
+                break
+            # 名字前的 identifier（导出宏）不属于类名，下一个 identifier 才是。
+            # An identifier before the name (an export macro) is not the class name.
+            name = (first, last)
+            position = self._skip_class_attributes(significant, position)
+        if position < len(significant) and self.lexemes[significant[position]].text == "final":
+            position += 1
+        if position >= len(significant):
+            return None
+        text = self.lexemes[significant[position]].text
+        if text == "{":
+            return name, significant[position]
+        if text != ":":
+            return None
+        # 基类列表：直到顶层的 {；其中出现顶层 ; 说明这不是类定义。
+        # The base clause runs to the top-level {; a top-level ; means this is no definition.
+        depth = 0
+        for index in significant[position + 1 :]:
+            text = self.lexemes[index].text
+            if text in ("(", "["):
+                depth += 1
+            elif text in (")", "]"):
+                depth -= 1
+            elif depth == 0 and text == "{":
+                return name, index
+            elif depth == 0 and text == ";":
                 return None
+        return None
+
+    def _skip_class_attributes(self, significant: list[int], position: int) -> int:
+        """跳过 [[...]]、alignas(...)、__attribute__((...)) 和 __declspec(...)，返回其后的位置。
+        Skip [[...]], alignas(...), __attribute__((...)) and __declspec(...) and return the
+        position after them.
+        """
+        while position < len(significant):
+            index = significant[position]
+            lexeme = self.lexemes[index]
             skip_to = None
             if lexeme.text == "[" and index in self._pairs:
+                following = significant[position + 1] if position + 1 < len(significant) else None
+                if following is None or self.lexemes[following].text != "[":
+                    return position
                 skip_to = self._pairs[index]
             elif lexeme.kind == "identifier" and lexeme.text in (
                 "alignas",
@@ -388,16 +457,11 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
                 following = significant[position + 1] if position + 1 < len(significant) else None
                 if following is not None and self.lexemes[following].text == "(":
                     skip_to = self._pairs.get(following)
-                if skip_to is None:
-                    return None
-            elif lexeme.kind == "identifier":
-                return index
             if skip_to is None:
-                position += 1
-                continue
+                return position
             while position < len(significant) and significant[position] <= skip_to:
                 position += 1
-        return None
+        return position
 
     def _parse_namespace(self, start: int, end: int) -> _Replacement | None:
         """解析 namespace body，使内部声明仍可结构化查询。
