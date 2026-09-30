@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 from xr_syntax.core import SourceSpan, SyntaxTree, decode_source
 
-from ._lexical_support import _inside_preprocessor
+from ._lexical_support import _preprocessor_mask
 from .lexer import _Lexeme, _Lexer
 
 # ---------------------------------------------------------------------------
@@ -106,10 +106,11 @@ def identifier_occurrences(source: str) -> tuple[CppIdentifierOccurrence, ...]:
     lexemes, diagnostics = _Lexer(source).scan()
     if diagnostics:
         raise ValueError(diagnostics[0].message)
+    directives = _preprocessor_mask(lexemes)
     significant = [
         (index, item)
         for index, item in enumerate(lexemes)
-        if not item.trivia and item.kind != "comment" and not _inside_preprocessor(lexemes, index)
+        if not item.trivia and item.kind != "comment" and not directives[index]
     ]
     result = []
     for position, (_, item) in enumerate(significant):
@@ -144,12 +145,13 @@ def find_invocations(
         if not item.trivia and item.kind != "comment"
     ]
     positions = {index: position for position, (index, _) in enumerate(significant)}
+    directives = _preprocessor_mask(lexemes)
     encoded = tree.render_bytes()
     result = []
     for index, item in significant:
         if item.kind != "identifier" or item.text != name:
             continue
-        if _inside_preprocessor(lexemes, index):
+        if directives[index]:
             continue
         position = positions[index]
         if position + 1 >= len(significant):

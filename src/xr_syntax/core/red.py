@@ -257,13 +257,34 @@ class SyntaxNode(SyntaxElement):
         """
         if include_self and (kind is None or self.kind == kind):
             yield self
-        for child in self.children:
-            if child.is_trivia and not include_trivia:
-                continue
-            if kind is None or child.kind == kind:
-                yield child
-            if isinstance(child, SyntaxNode):
-                yield from child.descendants(kind, include_trivia=include_trivia)
+        yield from self._descendants(kind, include_trivia)
+
+    def _descendants(self, kind: str | None, include_trivia: bool) -> Iterator[SyntaxElement]:
+        """descendants 的遍历：在 green 树上前进，只为节点和要返回的元素创建 red 视图。
+        The traversal behind descendants: it walks the green tree and creates red views only
+        for nodes and for the elements it returns.
+        """
+        tree = self._tree
+        offset = self._offset
+        for index, child in enumerate(self.green.children):
+            green = child.element
+            if isinstance(green, GreenNode):
+                node = SyntaxNode(
+                    tree, green, parent=self, index=index, offset=offset, field=child.field
+                )
+                if kind is None or green.kind == kind:
+                    yield node
+                yield from node._descendants(kind, include_trivia)
+            elif kind is None or green.kind == kind:
+                if isinstance(green, GreenToken):
+                    yield SyntaxToken(
+                        tree, green, parent=self, index=index, offset=offset, field=child.field
+                    )
+                elif include_trivia:
+                    yield SyntaxTrivia(
+                        tree, green, parent=self, index=index, offset=offset, field=child.field
+                    )
+            offset += green.byte_width
 
     def first_descendant(self, kind: str) -> SyntaxElement | None:
         """返回深度优先遍历中第一个指定 kind 的后代。

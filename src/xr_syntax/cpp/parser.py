@@ -99,6 +99,7 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
         self.diagnostics = list(diagnostics)
         self._pairs: dict[int, int] = {}
         self._reverse_pairs: dict[int, int] = {}
+        self._index_significant()
         self._build_delimiter_pairs()
 
     def parse_translation_unit(self) -> GreenNode:

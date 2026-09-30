@@ -4,6 +4,8 @@ Internal helpers shared by C++ lexical-query modules.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from .lexer import _Lexeme
 
 # ---------------------------------------------------------------------------
@@ -11,22 +13,27 @@ from .lexer import _Lexeme
 # ---------------------------------------------------------------------------
 
 
-def _inside_preprocessor(lexemes: list[_Lexeme], index: int) -> bool:
-    """判断 lexeme 是否位于预处理逻辑行，包括反斜杠续行。
-    Return whether a lexeme belongs to a preprocessor logical line, including continuations.
+def _preprocessor_mask(lexemes: Sequence[_Lexeme]) -> list[bool]:
+    """每个 lexeme 是否位于预处理逻辑行（从 # 开始，含反斜杠续行）。
+    Whether each lexeme belongs to a preprocessor logical line (from a # on, continuation
+    lines included).
+
+    一遍前向扫描：换行前最后一个非空白 lexeme 是反斜杠时，逻辑行延续到下一行。
+    One forward pass: when the last non-whitespace lexeme before a line ending is a
+    backslash, the logical line continues on the next line.
     """
-    cursor = index
-    while cursor >= 0:
-        item = lexemes[cursor]
-        if item.trivia and ("\n" in item.text or "\r" in item.text):
-            previous = cursor - 1
-            while previous >= 0 and lexemes[previous].trivia:
-                previous -= 1
-            if previous >= 0 and lexemes[previous].text == "\\":
-                cursor = previous - 1
-                continue
-            break
-        if not item.trivia and item.kind != "comment" and item.text == "#":
-            return True
-        cursor -= 1
-    return False
+    mask = []
+    directive = False
+    last_text = None
+    for item in lexemes:
+        if item.trivia:
+            line_end = "\n" in item.text or "\r" in item.text
+            if line_end and last_text != "\\":
+                directive = False
+            mask.append(directive)
+            continue
+        if item.kind != "comment" and item.text == "#":
+            directive = True
+        mask.append(directive)
+        last_text = item.text
+    return mask

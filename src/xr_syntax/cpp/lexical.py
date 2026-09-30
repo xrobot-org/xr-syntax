@@ -9,8 +9,8 @@ from dataclasses import dataclass
 
 from xr_syntax.core import SourceSpan
 
-from ._lexical_support import _inside_preprocessor
-from .lexer import _LITERAL_KINDS, _Lexer
+from ._lexical_support import _preprocessor_mask
+from .lexer import _LITERAL_KINDS, _Lexeme, _Lexer
 
 # ---------------------------------------------------------------------------
 # 模块实现：提供带字符/字节位置的公共 C++ 词法 token 查询。
@@ -30,8 +30,6 @@ class CppLexicalToken:
     span: SourceSpan
 
 
-# Lexer 内部 span 使用 UTF-8 byte offset；公共 API 同时暴露 Python 字符下标，
-# 因此这里建立 byte->char 映射，而不是假设非 ASCII 字符宽度为 1 byte。
 def code_tokens(source: str) -> tuple[CppLexicalToken, ...]:
     """返回实际 C++ 代码 token，跳过 trivia、注释和预处理逻辑行。
     Return C++ code tokens while excluding trivia, comments, and preprocessor logical lines.
@@ -39,16 +37,27 @@ def code_tokens(source: str) -> tuple[CppLexicalToken, ...]:
     lexemes, diagnostics = _Lexer(source).scan()
     if diagnostics:
         raise ValueError(diagnostics[0].message)
-    byte_to_char = _byte_to_char_offsets(source)
+    return _code_tokens_of(lexemes)
+
+
+def _code_tokens_of(lexemes: Sequence[_Lexeme]) -> tuple[CppLexicalToken, ...]:
+    """由 lexeme 序列得到代码 token；字符位置由各 lexeme 的文本长度累加得出。
+    The code tokens of a lexeme sequence; character positions add up the lexemes' text
+    lengths.
+    """
+    directives = _preprocessor_mask(lexemes)
     result = []
-    for index, item in enumerate(lexemes):
-        if item.trivia or item.kind == "comment" or _inside_preprocessor(lexemes, index):
+    char_offset = 0
+    for item, directive in zip(lexemes, directives, strict=True):
+        start = char_offset
+        char_offset += len(item.text)
+        if item.trivia or directive or item.kind == "comment":
             continue
         result.append(
             CppLexicalToken(
                 item.text,
-                byte_to_char[item.start],
-                byte_to_char[item.end],
+                start,
+                char_offset,
                 _public_kind(item.kind),
                 SourceSpan(item.start, item.end),
             )
@@ -86,18 +95,6 @@ def matching_delimiter(tokens: Sequence[CppLexicalToken], start: int) -> int:
             if not stack:
                 return index
     raise ValueError(f"Unclosed delimiter at offset {tokens[start].start}")
-
-
-def _byte_to_char_offsets(source: str) -> dict[int, int]:
-    """建立 token 边界使用的 byte offset 到字符 offset 映射。
-    Build the byte-to-character offset map used at lexical-token boundaries.
-    """
-    result = {0: 0}
-    byte_offset = 0
-    for char_offset, char in enumerate(source, 1):
-        byte_offset += len(char.encode("utf-8", errors="surrogateescape"))
-        result[byte_offset] = char_offset
-    return result
 
 
 def _public_kind(kind: str) -> str:

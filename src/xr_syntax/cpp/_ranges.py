@@ -4,10 +4,12 @@ Internal C++ parser helpers for source ranges, delimiters, replacements, and gre
 
 from __future__ import annotations
 
+from bisect import bisect_left
 from collections.abc import Iterable
 from dataclasses import dataclass
 
 from xr_syntax.core import Diagnostic, GreenChild, GreenElement, GreenNode, SourcePoint, SourceSpan
+from xr_syntax.core.green import _child, _node
 
 from ._support import _ParserSupport
 from .lexer import _BINARY_PRECEDENCE, _CONTROL
@@ -279,36 +281,69 @@ class _RangeMixin(_ParserSupport):
             return None
         return first, last + 1
 
+    def _index_significant(self) -> None:
+        """预先算出有效 lexeme（非空白、非注释）的下标，以及每个位置前后最近的有效 lexeme。
+        Precompute the indices of significant lexemes (not whitespace, not comments) and the
+        nearest significant lexeme before and after each position.
+        """
+        count = len(self.lexemes)
+        significant = [
+            index
+            for index, item in enumerate(self.lexemes)
+            if not item.trivia and item.kind != "comment"
+        ]
+        following = [count] * (count + 1)
+        preceding = [-1] * count
+        cursor = 0
+        for index in significant:
+            for position in range(cursor, index + 1):
+                following[position] = index
+            cursor = index + 1
+        cursor = -1
+        for index in significant:
+            for position in range(cursor + 1, index):
+                preceding[position] = cursor
+            preceding[index] = index
+            cursor = index
+        for position in range(cursor + 1, count):
+            preceding[position] = cursor
+        self._significant_indices = significant
+        self._following = following
+        self._preceding = preceding
+        # 普通 lexeme 在 compose 中总是以同一条无 field 的边出现，预先建好以便整段复用。
+        # A plain lexeme always appears in compose as the same edge without a field, so the
+        # edges are built once and reused in slices.
+        self._plain_children = [_child(item.green()) for item in self.lexemes]
+
     def _significant(self, start: int, end: int) -> list[int]:
         """返回排除空白和注释后的 lexeme 索引。
         Return lexeme indices after excluding trivia and comments.
         """
-        return [
-            index
-            for index in range(max(0, start), min(end, len(self.lexemes)))
-            if not self.lexemes[index].trivia and self.lexemes[index].kind != "comment"
-        ]
+        indices = self._significant_indices
+        low = bisect_left(indices, max(0, start))
+        high = bisect_left(indices, min(end, len(self.lexemes)))
+        return indices[low:high]
 
     def _next_significant(self, start: int, end: int) -> int | None:
         """向右寻找下一个非 trivia/comment lexeme。
         Find the next non-trivia, non-comment lexeme to the right.
         """
-        for index in range(max(0, start), min(end, len(self.lexemes))):
-            item = self.lexemes[index]
-            if not item.trivia and item.kind != "comment":
-                return index
-        return None
+        start = max(0, start)
+        limit = min(end, len(self.lexemes))
+        if start >= limit:
+            return None
+        index = self._following[start]
+        return index if index < limit else None
 
     def _previous_significant(self, start: int, lower_bound: int) -> int | None:
         """向左寻找上一个非 trivia/comment lexeme。
         Find the previous non-trivia, non-comment lexeme to the left.
         """
         upper = min(start, len(self.lexemes) - 1)
-        for index in range(upper, lower_bound - 1, -1):
-            item = self.lexemes[index]
-            if not item.trivia and item.kind != "comment":
-                return index
-        return None
+        if upper < lower_bound or upper < 0:
+            return None
+        index = self._preceding[upper]
+        return index if index >= max(lower_bound, 0) else None
 
     def _line_prefix_is_trivia(self, index: int, lower_bound: int) -> bool:
         """判断 `#` 前直到行首是否只有空白。
@@ -345,18 +380,15 @@ class _RangeMixin(_ParserSupport):
             for replacement in replacements
             if start <= replacement.start < replacement.end <= end
         )
+        plain = self._plain_children
         children: list[GreenChild] = []
         cursor = start
         for replacement in ordered:
-            while cursor < replacement.start:
-                children.append(GreenChild(self.lexemes[cursor].green()))
-                cursor += 1
-            children.append(GreenChild(replacement.element, replacement.field))
+            children += plain[cursor : replacement.start]
+            children.append(_child(replacement.element, replacement.field))
             cursor = replacement.end
-        while cursor < end:
-            children.append(GreenChild(self.lexemes[cursor].green()))
-            cursor += 1
-        return GreenNode(kind, tuple(children), named=True)
+        children += plain[cursor:end]
+        return _node(kind, tuple(children))
 
     def _diagnostic(self, message: str, start: int, end: int) -> None:
         """以 lexeme 字节范围记录结构 parser 诊断。

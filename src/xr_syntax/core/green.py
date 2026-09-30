@@ -55,7 +55,8 @@ class GreenTrivia(_GreenMixin):
         """返回该 trivia 按源码编码后的字节宽度。
         Return the encoded source width in bytes.
         """
-        return len(encode_source(self.text))
+        text = self.text
+        return len(text) if text.isascii() else len(encode_source(text))
 
 
 @dataclass(frozen=True)
@@ -81,7 +82,8 @@ class GreenToken(_GreenMixin):
         """返回该 token 按源码编码后的字节宽度。
         Return the encoded source width in bytes.
         """
-        return len(encode_source(self.text))
+        text = self.text
+        return len(text) if text.isascii() else len(encode_source(text))
 
 
 # 每个 green child 要么是语法 node/token，要么是必须保留的源码 trivia。
@@ -182,3 +184,66 @@ class GreenNode(_GreenMixin):
             missing=self.missing,
             error=self.error,
         )
+
+
+# ---------------------------------------------------------------------------
+# parser 的快速构造
+# Fast construction for the parser
+# ---------------------------------------------------------------------------
+
+# frozen dataclass 的 __init__ 对每个字段调用一次 object.__setattr__。parser 为每个 lexeme 创建一个
+# token 和一条边，这里直接写实例字典；得到的对象与正常构造的对象相等，哈希也相同。
+# A frozen dataclass __init__ calls object.__setattr__ once per field. The parser creates one
+# token and one edge per lexeme, so these write the instance dictionary directly; the objects
+# are equal to, and hash like, the normally constructed ones.
+_new = object.__new__
+
+
+def _token(kind: str, text: str, named: bool) -> GreenToken:
+    """与 GreenToken(kind, text, named=named) 相等的 token。
+    A token equal to GreenToken(kind, text, named=named).
+    """
+    element = _new(GreenToken)
+    fields = element.__dict__
+    fields["kind"] = kind
+    fields["text"] = text
+    fields["named"] = named
+    fields["missing"] = False
+    fields["error"] = False
+    return element
+
+
+def _trivia(kind: str, text: str) -> GreenTrivia:
+    """与 GreenTrivia(kind, text) 相等的 trivia。
+    A trivia equal to GreenTrivia(kind, text).
+    """
+    element = _new(GreenTrivia)
+    fields = element.__dict__
+    fields["kind"] = kind
+    fields["text"] = text
+    return element
+
+
+def _child(element: GreenElement, field: str | None = None) -> GreenChild:
+    """与 GreenChild(element, field) 相等的边。
+    An edge equal to GreenChild(element, field).
+    """
+    child = _new(GreenChild)
+    fields = child.__dict__
+    fields["element"] = element
+    fields["field"] = field
+    return child
+
+
+def _node(kind: str, children: tuple[GreenChild, ...]) -> GreenNode:
+    """与 GreenNode(kind, children, named=True) 相等的节点。
+    A node equal to GreenNode(kind, children, named=True).
+    """
+    node = _new(GreenNode)
+    fields = node.__dict__
+    fields["kind"] = kind
+    fields["children"] = children
+    fields["named"] = True
+    fields["missing"] = False
+    fields["error"] = False
+    return node
