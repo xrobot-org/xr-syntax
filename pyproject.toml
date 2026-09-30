@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61", "wheel"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -14,7 +14,8 @@ maintainers = [
     {name = "Xiao", email = "2592509183@qq.com"}
 ]
 readme = "README.md"
-license = {text = "Apache-2.0"}
+license = "Apache-2.0"
+license-files = ["LICENSE", "src/xr_syntax/cmake/grammar/LICENSE.tree-sitter-cmake"]
 keywords = ["C++", "CMake", "source transformation", "code generation", "XRobot"]
 dependencies = []
 
@@ -26,7 +27,6 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
-    "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
     "Typing :: Typed",
 ]
@@ -40,7 +40,7 @@ Repository = "https://github.com/xrobot-org/xr-syntax"
 dev = [
     "build>=1.2",
     "pytest>=8",
-    "ruff>=0.12",
+    "ruff==0.16.9",
     "mypy==1.14.1",
 ]
 

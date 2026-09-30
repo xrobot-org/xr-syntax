@@ -50,29 +50,6 @@ Factories still validate standalone `SyntaxFragment` objects. A factory fragment
 旧 Tree-sitter C++ backend 曾跑过 4,420 files / 153,971,079 bytes 的 corpus；该结果只作为历史基线，不代表当前 native parser 的覆盖数字。  
 The former Tree-sitter C++ backend ran a 4,420-file / 153,971,079-byte corpus. That result is kept as a historical baseline and is not counted as native-parser coverage.
 
-## XRobot 构造函数 parity / XRobot Constructor Parity
-
-当前 XRobot 官方模块索引包含 29 个模块。使用 XRobot 0.3.1 的 manifest 解析路径和 xr-syntax native C++ parser 对主头文件进行对比：  
-The current official XRobot module index contains 29 modules. Primary headers were compared using XRobot 0.3.1 manifest parsing and the xr-syntax native C++ parser:
-
-- 29 primary headers
-- 28 modules with manifests / 28 个带 manifest 的模块
-- 28 matches / 28 个匹配
-- 0 mismatches / 0 个不匹配
-- 1 skipped: `DurationStatistics` has no module manifest / 1 个跳过：`DurationStatistics` 没有 module manifest
-
-parity 按当前 consumer 的实际语义比较：manifest 的构造参数按位置配置，不要求配置 key 与 C++ 参数名相同；构造函数去掉固定的 `HardwareContainer` 和 `ApplicationManager` 参数后比较参数数量，同时比较 template 参数数量。  
-Parity follows current consumer semantics: manifest constructor entries are positional configuration and their keys do not need to match C++ parameter names. The comparison removes the fixed `HardwareContainer` and `ApplicationManager` prefix, compares remaining constructor arity, and checks template-parameter count.
-
-该 corpus 发现并修复了反斜杠续行 `#define` 会吞掉后续 class 结构的问题。  
-This corpus exposed and fixed a structural parser bug where a backslash-continued `#define` could consume a following class declaration.
-
-运行工具 / Run the tool:
-
-```bash
-python tools/compare_xrobot_interfaces.py <module-root> --json xrobot-parity.json
-```
-
 ## 性能基线 / Performance Baseline
 
 进入 consumer migration 前使用同一个脚本记录 parse、query、单次编辑和批量编辑耗时：  
