@@ -40,6 +40,19 @@ def test_a_long_operator_chain_is_left_associative_and_needs_no_recursion() -> N
     assert right is not None and right.text == "a2999"
 
 
+def test_assignment_is_right_associative() -> None:
+    """a = b = c 解析成 a = (b = c)。
+    a = b = c parses as a = (b = c).
+    """
+    document = CppDocument.parse("void f() { a = b = c; }\n")
+    outer = next(document.root.descendants("assignment_expression"))
+    assert isinstance(outer, SyntaxNode)
+    left, right = outer.child_by_field("left"), outer.child_by_field("right")
+    assert left is not None and left.text == "a"
+    assert right is not None and right.kind == "assignment_expression"
+    assert right.text == "b = c"
+
+
 def test_nesting_as_deep_as_real_code_is_fully_structured() -> None:
     """50 层嵌套调用（实际源码最深约 22 层）全部结构化，没有诊断。
     Calls nested 50 deep (real source nests about 22 levels at most) are all structured, without

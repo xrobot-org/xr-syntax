@@ -293,14 +293,17 @@ class _ExpressionMixin(_ParserSupport):
         Split an expression at its weakest-binding operators into binary or assignment
         expressions; None when it cannot be split.
 
-        同一优先级的一串运算符用循环建树，不随运算符个数递归，左结合（(a + b) + c）。
-        各段表达式直接拿到自己那一段的运算符，不再重新扫描。
+        同一优先级的一串运算符用循环建树，不随运算符个数递归：赋值右结合（a = (b = c)），
+        其余左结合（(a + b) + c）。各段表达式直接拿到自己那一段的运算符，不再重新扫描。
         A run of operators of the same precedence is built in a loop instead of recursing once per
-        operator, left-associatively ((a + b) + c). Each operand segment gets its own slice of the
-        operators instead of being scanned again.
+        operator: assignment is right-associative (a = (b = c)), the rest left-associative
+        ((a + b) + c). Each operand segment gets its own slice of the operators instead of being
+        scanned again.
         """
         minimum = min(precedence for precedence, _ in operators)
         chain = [index for index, (precedence, _) in enumerate(operators) if precedence == minimum]
+        if minimum == _BINARY_PRECEDENCE["="]:
+            return self._assignment_chain(start, end, low, high, operators, chain)
         return self._left_chain(start, end, low, high, operators, chain)
 
     def _left_chain(
@@ -357,6 +360,63 @@ class _ExpressionMixin(_ParserSupport):
                 (start, sig[position - 1] + 1, node),
                 sig[position],
                 (right_start, ends[level], right),
+            )
+        return node
+
+    def _assignment_chain(
+        self,
+        start: int,
+        end: int,
+        low: int,
+        high: int,
+        operators: list[tuple[int, int]],
+        chain: list[int],
+    ) -> GreenElement | None:
+        """右结合的一串赋值运算符：每个赋值左边是前一段，右边是其后的整个表达式。
+        A right-associative run of assignment operators: the left operand of each assignment is
+        the segment before it, the right operand everything after it.
+
+        右侧每一段先按完整表达式的开头规则检查（lambda、new、括号等）；左段或右段为空的那一层
+        整体退回调用/源码表达式。chain 是这串运算符在 operators 中的下标。
+        Each right-hand part is first checked against the rules for the start of a whole
+        expression (lambda, new, parentheses and so on); a level whose left or right part is empty
+        falls back as a whole to a call/source expression. chain holds the indices of the run in
+        operators.
+        """
+        sig = self._sig
+        levels: list[tuple[int, int, GreenElement]] = []
+        tail: GreenElement | None = None
+        level_start = start
+        level_low = low
+        previous = -1
+        for number, index in enumerate(chain):
+            position = operators[index][1]
+            if number:
+                tail = self._atomic_expression(level_start, end, level_low, high)
+                if tail is not None:
+                    break
+            if position == level_low or position + 1 >= high:
+                if not number:
+                    return None
+                tail = self._expression_tail(level_start, end, level_low, high)
+                break
+            left = self._parse_expression(
+                level_start, sig[position - 1] + 1, operators[previous + 1 : index]
+            )
+            levels.append((level_start, position, left))
+            level_start = sig[position + 1]
+            level_low = position + 1
+            previous = index
+        if tail is None:
+            tail = self._parse_expression(level_start, end, operators[previous + 1 :])
+        node = tail
+        for level_start, position, left in reversed(levels):
+            node = self._binary_node(
+                level_start,
+                end,
+                (level_start, sig[position - 1] + 1, left),
+                sig[position],
+                (sig[position + 1], end, node),
             )
         return node
 
