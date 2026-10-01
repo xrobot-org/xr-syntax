@@ -45,6 +45,21 @@ Factories still validate standalone `SyntaxFragment` objects. A factory fragment
 `require_clean=True` 覆盖生成结果的严格错误策略，默认模式则保留 parser diagnostics 供调用者处理。  
 `require_clean=True` covers the strict generation path, while the default build mode preserves parser diagnostics for the caller.
 
+## 解析器版本对比 / Comparing Parser Revisions
+
+改动 C++ parser 的内部实现时，用对比工具确认同一批源码的语法树和诊断没有变化：  
+When the internals of the C++ parser change, the comparison tool confirms that the syntax trees and diagnostics for a set of sources stay the same:
+
+```bash
+python tools/compare_parsers.py --base HEAD path/to/sources more/sources
+```
+
+工具从 git 取出 `--base`（以及可选的 `--head`）版本的 `src`，省略 `--head` 时与工作区比较。每个文件的结果按先序列出全部 green 元素和诊断，有差异时打印前几个文件的差异并返回 1。  
+The tool takes `src` of the `--base` revision (and optionally of `--head`) from git and compares it with the working tree when `--head` is omitted. Each file's result lists every green element in pre-order plus the diagnostics; on differences it prints the diffs of the first files and returns 1.
+
+2026-10 的解析器重写用它在 libxr、BSP 和模块的 11,242 个 C/C++ 文件（238 MiB）上对比：语法树和诊断完全一致；随后把赋值改为右结合，有 938 个文件发生变化，全部是连续赋值。  
+The 2026-10 parser rewrite was compared with it on 11,242 C/C++ files (238 MiB) from libxr, the BSPs, and the modules: syntax trees and diagnostics were identical. Making assignment right-associative afterwards changed 938 files, all of them in runs of assignments.
+
 ## 历史基线 / Historical Baselines
 
 旧 Tree-sitter C++ backend 曾跑过 4,420 files / 153,971,079 bytes 的 corpus；该结果只作为历史基线，不代表当前 native parser 的覆盖数字。  
