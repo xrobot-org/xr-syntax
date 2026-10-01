@@ -6,11 +6,12 @@ from __future__ import annotations
 
 import argparse
 import sys
+import textwrap
 
 import pytest
 
 from xr_syntax.cpp import code_tokens
-from xr_syntax.i18n import chinese, localize_argparse, tr
+from xr_syntax.i18n import _width, _wrap, chinese, localize_argparse, tr
 
 
 def test_the_first_set_variable_chooses_the_language(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -77,3 +78,42 @@ def test_argparse_texts_are_translated_in_chinese(monkeypatch: pytest.MonkeyPatc
     assert ("repeat（默认：1）" if translated else "repeat (default: 1)") in help_text
     with pytest.raises(SystemExit):
         parser().parse_args([])
+
+
+def test_wide_text_wraps_by_column_width() -> None:
+    """验证宽字符按 2 列计算、宽字符之间可以换行，以及避头尾。
+    Verify wide characters count as 2 columns, lines may break between them, and punctuation
+    stays off the wrong line ends.
+    """
+    assert _wrap("甲乙丙丁", 4) == ["甲乙", "丙丁"]
+    assert _wrap("甲，乙", 2) == ["甲，", "乙"]
+    assert _wrap("乙（甲）丙", 6) == ["乙", "（甲）", "丙"]
+    assert _wrap("用 java -jar 启动", 8) == ["用 java", "-jar 启", "动"]
+
+
+def test_help_holding_chinese_wraps_by_column_width(monkeypatch: pytest.MonkeyPatch) -> None:
+    """验证含中文的帮助不超过列宽、不拆开网址，纯英文帮助仍由 textwrap 折行。
+    Verify help holding Chinese stays within the columns without splitting a URL, while
+    English help is still wrapped by textwrap.
+    """
+    localize_argparse()
+    monkeypatch.setenv("COLUMNS", "60")
+    text = (
+        "缺少 LibXR 时从哪里克隆：auto、github，或基础地址、仓库地址（默认：auto）；"
+        ".gitmodules 始终记录 https://github.com/xrobot-org/libxr.git"
+    )
+    parser = argparse.ArgumentParser(prog="tool")
+    parser.add_argument("--source", help=text)
+    lines = parser.format_help().splitlines()
+    first = next(i for i, line in enumerate(lines) if line.startswith("  --source SOURCE"))
+    # 帮助的第一行与选项同行。
+    # The first help line shares the line of the option.
+    body = [lines[first].split("SOURCE", 1)[1], *lines[first + 1 :]]
+    assert "".join(line.strip() for line in body).replace(" ", "") == text.replace(" ", "")
+    assert all(_width(line) <= 58 for line in lines[first:-1])
+    assert body[-1].strip() == "https://github.com/xrobot-org/libxr.git"
+    assert not any(line.strip()[:1] in "，。、；：）" for line in body)
+
+    english = "where a missing LibXR is cloned from: auto, github, or a base or repository URL"
+    formatter = argparse.HelpFormatter("tool")
+    assert formatter._split_lines(english, 30) == textwrap.wrap(english, 30)
