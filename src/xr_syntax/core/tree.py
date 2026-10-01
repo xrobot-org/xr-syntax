@@ -4,6 +4,7 @@ Immutable syntax-tree snapshot and low-level structural edit operations.
 
 from __future__ import annotations
 
+import functools
 from collections.abc import Iterable
 from dataclasses import dataclass
 
@@ -56,13 +57,30 @@ class SyntaxTree:
         """按 green root 原样渲染完整源码文本。
         Render the complete represented source without normalization.
         """
-        return self.green_root.render()
+        return self._source_text
 
     def render_bytes(self) -> bytes:
         """按源码编码原样渲染完整源码字节。
         Render the complete represented source as bytes.
         """
-        return encode_source(self.render())
+        return self._source_bytes
+
+    # 快照不可变，渲染结果只计算一次；行号、invocation 文本和解析后的无损检查都会用到它。
+    # The snapshot is immutable, so it is rendered once; line numbers, invocation texts and
+    # the lossless check after parsing all use the result.
+    @functools.cached_property
+    def _source_text(self) -> str:
+        """渲染一次的源码文本。
+        The source text, rendered once.
+        """
+        return self.green_root.render()
+
+    @functools.cached_property
+    def _source_bytes(self) -> bytes:
+        """编码一次的源码字节。
+        The source bytes, encoded once.
+        """
+        return encode_source(self._source_text)
 
     # 这里的低层编辑只沿 target.path 重建祖先链；路径之外的 green subtree
     # 继续复用原对象。高层 Document 在需要恢复 parser field/diagnostic 时再 reparse。

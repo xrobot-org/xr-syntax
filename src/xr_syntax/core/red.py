@@ -5,6 +5,7 @@ Parent-aware, position-aware views over immutable green syntax elements.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from collections.abc import Set as AbstractSet
 from typing import TYPE_CHECKING
 
 from .green import GreenChild, GreenElement, GreenNode, GreenToken, GreenTrivia
@@ -249,42 +250,70 @@ class SyntaxNode(SyntaxElement):
         self,
         kind: str | None = None,
         *,
+        kinds: AbstractSet[str] | None = None,
         include_self: bool = False,
         include_trivia: bool = False,
     ) -> Iterator[SyntaxElement]:
-        """按深度优先顺序遍历后代，并支持 kind 和 trivia 过滤。
-        Depth-first traversal of descendants with optional kind/trivia filtering.
-        """
-        if include_self and (kind is None or self.kind == kind):
-            yield self
-        yield from self._descendants(kind, include_trivia)
+        """按深度优先顺序遍历后代，并支持 kind（或一组 kinds）和 trivia 过滤。
+        Depth-first traversal of descendants with optional kind (or a set of kinds) and
+        trivia filtering.
 
-    def _descendants(self, kind: str | None, include_trivia: bool) -> Iterator[SyntaxElement]:
+        只返回少数几类节点时用 kinds 一次遍历，比不加过滤地遍历再筛选快：不需要的 token
+        不会创建 red 视图。
+        For a few node kinds, one traversal with kinds is faster than an unfiltered one
+        filtered afterwards: unwanted tokens get no red view.
+        """
+        if kind is not None and kinds is not None:
+            raise ValueError("pass kind or kinds, not both")
+        wanted = kinds if kinds is not None else (None if kind is None else {kind})
+        if include_self and (wanted is None or self.kind in wanted):
+            yield self
+        yield from self._descendants(wanted, include_trivia)
+
+    def _descendants(
+        self, wanted: AbstractSet[str] | None, include_trivia: bool
+    ) -> Iterator[SyntaxElement]:
         """descendants 的遍历：在 green 树上前进，只为节点和要返回的元素创建 red 视图。
         The traversal behind descendants: it walks the green tree and creates red views only
         for nodes and for the elements it returns.
+
+        用显式栈代替递归生成器：递归时每返回一个元素都要经过各层生成器，深的树代价随深度增长。
+        An explicit stack replaces recursive generators, where every element passed through
+        one generator per level, so deep trees cost more with every level.
         """
         tree = self._tree
-        offset = self._offset
-        for index, child in enumerate(self.green.children):
+        # 每一层：父节点、它的 green 子元素、下一个下标、该子元素的字节偏移。
+        # Each level: the parent, its green children, the next index and that child's offset.
+        stack: list[tuple[SyntaxNode, tuple[GreenChild, ...], int, int]] = []
+        parent, children, index, offset = self, self.green.children, 0, self._offset
+        while True:
+            if index == len(children):
+                if not stack:
+                    return
+                parent, children, index, offset = stack.pop()
+                continue
+            child = children[index]
             green = child.element
             if isinstance(green, GreenNode):
                 node = SyntaxNode(
-                    tree, green, parent=self, index=index, offset=offset, field=child.field
+                    tree, green, parent=parent, index=index, offset=offset, field=child.field
                 )
-                if kind is None or green.kind == kind:
+                if wanted is None or green.kind in wanted:
                     yield node
-                yield from node._descendants(kind, include_trivia)
-            elif kind is None or green.kind == kind:
+                stack.append((parent, children, index + 1, offset + green.byte_width))
+                parent, children, index = node, green.children, 0
+                continue
+            if wanted is None or green.kind in wanted:
                 if isinstance(green, GreenToken):
                     yield SyntaxToken(
-                        tree, green, parent=self, index=index, offset=offset, field=child.field
+                        tree, green, parent=parent, index=index, offset=offset, field=child.field
                     )
                 elif include_trivia:
                     yield SyntaxTrivia(
-                        tree, green, parent=self, index=index, offset=offset, field=child.field
+                        tree, green, parent=parent, index=index, offset=offset, field=child.field
                     )
             offset += green.byte_width
+            index += 1
 
     def first_descendant(self, kind: str) -> SyntaxElement | None:
         """返回深度优先遍历中第一个指定 kind 的后代。
