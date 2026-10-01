@@ -217,7 +217,7 @@ class CppDocument(SyntaxDocument):
         """返回 class/struct 定义，并可按源码级名称过滤。
         Return class/struct specifiers, optionally filtered by source-level name.
         """
-        nodes = self.nodes("class_specifier") + self.nodes("struct_specifier")
+        nodes = self._nodes_grouped(("class_specifier", "struct_specifier"))
         if name is None:
             return nodes
         return tuple(node for node in nodes if field_text(node, "name") == name)
@@ -293,8 +293,18 @@ class CppDocument(SyntaxDocument):
         """返回文档中的声明节点集合。
         Return common declaration-like syntax nodes.
         """
-        kinds = ("declaration", "function_definition", "template_declaration")
-        return tuple(node for kind in kinds for node in self.nodes(kind))
+        return self._nodes_grouped(("declaration", "function_definition", "template_declaration"))
+
+    def _nodes_grouped(self, kinds: tuple[str, ...]) -> tuple[SyntaxNode, ...]:
+        """一次遍历取出这些 kind 的节点，按 kinds 的顺序分组排列，组内保持源码顺序。
+        The nodes of these kinds from one walk, grouped in the order of kinds, each group in
+        source order.
+        """
+        groups: dict[str, list[SyntaxNode]] = {kind: [] for kind in kinds}
+        for element in self.root.descendants(kinds=frozenset(kinds), include_self=True):
+            if isinstance(element, SyntaxNode):
+                groups[element.kind].append(element)
+        return tuple(node for kind in kinds for node in groups[kind])
 
     def user_regions(self) -> tuple[CppRegion, ...]:
         """识别并返回成对的 User Code Begin/End 区域。
