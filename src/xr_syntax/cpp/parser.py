@@ -4,31 +4,65 @@ xr-syntax native C++ structural parser. It builds source-level syntax without Tr
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+import sys
+from itertools import accumulate, compress
 
 from xr_syntax.core import (
-    Diagnostic,
     GreenElement,
     GreenNode,
-    GreenToken,
     ParserKindInfo,
     ParserSchema,
     SyntaxTree,
     decode_source,
     encode_source,
 )
+from xr_syntax.core.green import _token
 from xr_syntax.i18n import tr
 
 from ._declaration import _DeclarationMixin
 from ._declarator import _DeclaratorMixin
 from ._expression import _ExpressionMixin
-from ._ranges import _deduplicate_replacements, _RangeMixin, _Replacement
+from ._ranges import _deduplicate_replacements, _RangeMixin
+from ._support import _Replacement
 from .grammar import CPP_GRAMMAR
-from .lexer import _PUNCTUATORS, _QUALIFIERS, _STORAGE, _TYPE_WORDS, _Lexeme, _Lexer
+from .lexer import _CONTROL, _PUNCTUATORS, _QUALIFIERS, _STORAGE, _TYPE_WORDS, _Lexed, lex
+
+_CLASS_KEYWORDS = frozenset({"class", "struct", "union"})
+_ACCESS_KEYWORDS = frozenset({"public", "private", "protected"})
+_CLASS_KINDS = {
+    "class": "class_specifier",
+    "struct": "struct_specifier",
+    "union": "union_specifier",
+}
+_PREPROCESSOR_KINDS = {
+    "include": "preproc_include",
+    "define": "preproc_def",
+    "if": "preproc_if",
+    "ifdef": "preproc_ifdef",
+    "ifndef": "preproc_ifdef",
+}
+_CONTROL_OR_DO = frozenset(_CONTROL | {"do"})
+_UNIT_DELIMITERS = frozenset({"(", ")", "[", "]", ";", "{"})
+_CLASS_ATTRIBUTE_WORDS = frozenset({"alignas", "__attribute__", "__declspec"})
+_OPENING_DELIMITERS = {"(": ")", "[": "]", "{": "}"}
+_CLOSING_DELIMITERS = {")": "(", "]": "[", "}": "{"}
+
+# 嵌套上限。作用域和表达式每嵌套一层，解析器用的 Python 调用不超过 _FRAMES_PER_NESTING 层
+# （实测最多 8 层）。上限按当前可用的递归深度计算，最多 _MAX_NESTING 层；实际源码最深约 22 层
+# （CMSIS DSP）。更深的内容保持为未结构化的源码并给出诊断，不会触发 RecursionError。
+# The nesting limit. Each nested scope or expression costs the parser at most _FRAMES_PER_NESTING
+# Python calls (8 measured at most). The limit follows from the recursion depth available at the
+# time and is at most _MAX_NESTING; real source nests about 22 levels at most (CMSIS DSP). Deeper
+# source stays unstructured with a diagnostic instead of raising RecursionError.
+_FRAMES_PER_NESTING = 10
+_MAX_NESTING = 100
+_RESERVED_FRAMES = 64
 
 
 # 对外 parser 只组织“词法扫描 -> 结构解析 -> round-trip 校验”三阶段；
 # 每次 parse 都创建独立 _StructuralParser，因此同一个 CppParser 可并发复用。
+# The public parser only runs the three stages lexing, structural parsing and round-trip check;
+# every parse creates its own _StructuralParser, so one CppParser can be shared concurrently.
 class CppParser:
     """无损 C++ source parser；parse 调用之间不共享可变状态。
     Lossless C++ parser whose parse calls do not share mutable parsing state.
@@ -76,19 +110,17 @@ class CppParser:
 
     def _parse_lexed(
         self, source: str | bytes, source_name: str | None
-    ) -> tuple[SyntaxTree, tuple[list[_Lexeme], list[Diagnostic]]]:
-        """解析源码，同时返回词法结果（lexeme 和 lexer 诊断），供文档复用。
-        Parse source and also return the lexing result (lexemes and lexer diagnostics) for
-        the document to reuse.
+    ) -> tuple[SyntaxTree, _Lexed]:
+        """解析源码，同时返回词法结果，供文档复用。
+        Parse source and also return the lexing result for the document to reuse.
         """
         data = encode_source(source) if isinstance(source, str) else bytes(source)
-        text = decode_source(data)
         # Lexer 负责 source-preserving lexeme 与基础诊断；StructuralParser
         # 只在 lexeme 范围上建立结构，不再重新切原始字符串。
-        lexer = _Lexer(text)
-        lexemes, diagnostics = lexer.scan()
-        lexed = (lexemes, list(diagnostics))
-        parser = _StructuralParser(lexemes, diagnostics)
+        # The lexer produces source-preserving lexemes and basic diagnostics; the structural
+        # parser only builds structure over lexeme ranges and never re-splits the source text.
+        lexed = lex(decode_source(data))
+        parser = _StructuralParser(lexed)
         root = parser.parse_translation_unit()
         tree = SyntaxTree("cpp", root, tuple(parser.diagnostics), source_name)
         if tree.render_bytes() != data:
@@ -103,107 +135,163 @@ class CppParser:
 
 # 结构层拆成 declaration / declarator / expression / range 四个 mixin；
 # 这里仅负责阶段调度和 translation-unit 级控制流，避免单文件变成巨型 parser。
+# The structural layer is split into the declaration / declarator / expression / range mixins;
+# this class only schedules the stages and handles translation-unit level control flow.
 class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _RangeMixin):
     """组合声明、declarator、表达式和区间解析阶段，构成原生 C++ 结构 parser。
     Combine declaration, declarator, expression, and range parsing stages into the native C++ structural parser.
     """
 
-    def __init__(self, lexemes: Sequence[_Lexeme], diagnostics: Iterable[Diagnostic]) -> None:
-        """保存词法结果并建立括号配对表。
-        Store the lexing result and build delimiter-pair tables.
+    def __init__(self, lexed: _Lexed) -> None:
+        """建立有效 lexeme 数组、位置表、叶子边和括号配对表。
+        Build the significant-lexeme arrays, the position table, the leaf edges and the
+        delimiter-pair tables.
         """
-        self.lexemes = tuple(lexemes)
-        self.diagnostics = list(diagnostics)
-        self._pairs: dict[int, int] = {}
-        self._reverse_pairs: dict[int, int] = {}
-        self._index_significant()
+        texts = lexed.texts
+        self._texts = texts
+        self._infos = lexed.infos
+        self._offsets = lexed.offsets
+        self._count = len(texts)
+        self.diagnostics = list(lexed.diagnostics)
+        significant = lexed.significance()
+        self._sig = list(compress(range(len(texts)), significant))
+        self._rank = list(accumulate(significant, initial=0))
+        self._stext = list(map(texts.__getitem__, self._sig))
+        self._plain = lexed.plain_children()
+        self._pairs = {}
+        self._reverse_pairs = {}
+        self._dirty = set()
+        self._variable_names = {}
+        self._depth = 0
+        self._depth_limit = _nesting_limit()
+        self._too_deep = False
         self._build_delimiter_pairs()
 
     def parse_translation_unit(self) -> GreenNode:
         """解析整个 translation unit；未知顶层片段原样保留。
         Parse the complete translation unit while preserving unknown top-level fragments verbatim.
         """
-        replacements = self._parse_scope(0, len(self.lexemes), context="top")
-        return self._compose("translation_unit", 0, len(self.lexemes), replacements)
+        replacements = self._parse_scope(0, self._count, context="top")
+        return self._compose("translation_unit", 0, self._count, replacements)
 
     def _build_delimiter_pairs(self) -> None:
         """对 (), [] 和 {} 建立配对，并对不平衡输入产生诊断。
         Pair (), [], and {} delimiters and emit diagnostics for unbalanced input.
         """
-        opens = {"(": ")", "[": "]", "{": "}"}
-        closes = {value: key for key, value in opens.items()}
         stack: list[tuple[str, int]] = []
-        for index, item in enumerate(self.lexemes):
-            if item.trivia or item.kind == "comment":
-                continue
-            text = item.text
-            if text in opens:
-                stack.append((text, index))
-            elif text in closes:
-                if not stack or stack[-1][0] != closes[text]:
+        sig = self._sig
+        stext = self._stext
+        pairs = self._pairs
+        reverse_pairs = self._reverse_pairs
+        # 先用 list.index（在 C 里查找）收集全部括号的位置，再按源码顺序配对。
+        # Collect the positions of all delimiters with list.index (which searches in C) first,
+        # then pair them in source order.
+        positions: list[int] = []
+        for delimiter in "()[]{}":
+            position = -1
+            try:
+                while True:
+                    position = stext.index(delimiter, position + 1)
+                    positions.append(position)
+            except ValueError:
+                pass
+        positions.sort()
+        for position in positions:
+            text = stext[position]
+            if text in _OPENING_DELIMITERS:
+                stack.append((text, sig[position]))
+            else:
+                index = sig[position]
+                if not stack or stack[-1][0] != _CLOSING_DELIMITERS[text]:
                     self._diagnostic(
                         tr("unmatched closing delimiter", "不匹配的闭合符号"), index, index + 1
                     )
+                    # 此刻未闭合的开括号以后若配对，组内就有这个多余的闭括号。
+                    # Opening delimiters still open now contain this stray closing delimiter
+                    # if they are paired later.
+                    self._dirty.update(opening for _, opening in stack)
                     continue
                 _, opening = stack.pop()
-                self._pairs[opening] = index
-                self._reverse_pairs[index] = opening
+                pairs[opening] = index
+                reverse_pairs[index] = opening
         for _, opening in stack:
             self._diagnostic(tr("unclosed delimiter", "未闭合的分隔符"), opening, opening + 1)
+
+    def _enter(self, start: int, end: int) -> bool:
+        """进入一层作用域或表达式嵌套；超过嵌套上限时记录一次诊断并返回 False。
+        Enter one level of scope or expression nesting; past the nesting limit, record one
+        diagnostic and return False.
+        """
+        if self._depth < self._depth_limit:
+            self._depth += 1
+            return True
+        if not self._too_deep:
+            self._too_deep = True
+            self._diagnostic(
+                tr(
+                    "nesting too deep; the inner source is kept unstructured",
+                    "嵌套过深，内层源码保持未结构化",
+                ),
+                start,
+                end,
+            )
+        return False
 
     def _parse_scope(self, start: int, end: int, *, context: str) -> list[_Replacement]:
         """按顶层语句/声明边界解析一个连续作用域。
         Parse one continuous scope using top-level statement/declaration boundaries.
         """
+        if not self._enter(start, end):
+            return []
         result: list[_Replacement] = []
         replacement: _Replacement | None
+        texts = self._texts
         cursor = start
         while True:
             current = self._next_significant(cursor, end)
             if current is None:
                 break
+            text = texts[current]
 
             # scope 解析按“明确结构优先”处理：预处理、template、class、
             # namespace、access label 都先于通用 unit/declaration fallback。
-            if self.lexemes[current].text == "#" and self._line_prefix_is_trivia(current, start):
+            # Explicit structures come first: preprocessor lines, templates, classes,
+            # namespaces and access labels precede the generic unit/declaration fallback.
+            if text == "#" and self._line_prefix_is_trivia(current, start):
                 replacement = self._parse_preprocessor(current, end)
                 result.append(replacement)
-                cursor = replacement.end
+                cursor = replacement[1]
                 continue
 
-            if self.lexemes[current].text == "template":
+            if text == "template":
                 replacement = self._parse_template(current, end, context=context)
                 if replacement is not None:
                     result.append(replacement)
-                    cursor = replacement.end
+                    cursor = replacement[1]
                     continue
 
-            if self.lexemes[current].text in {"class", "struct", "union"}:
+            if text in _CLASS_KEYWORDS:
                 replacement = self._parse_class(current, end)
                 if replacement is not None:
                     result.append(replacement)
-                    cursor = replacement.end
+                    cursor = replacement[1]
                     semicolon = self._next_significant(cursor, end)
-                    if semicolon is not None and self.lexemes[semicolon].text == ";":
+                    if semicolon is not None and texts[semicolon] == ";":
                         cursor = semicolon + 1
                     continue
 
-            if self.lexemes[current].text == "namespace":
+            if text == "namespace":
                 replacement = self._parse_namespace(current, end)
                 if replacement is not None:
                     result.append(replacement)
-                    cursor = replacement.end
+                    cursor = replacement[1]
                     continue
 
-            if context == "class" and self.lexemes[current].text in {
-                "public",
-                "private",
-                "protected",
-            }:
+            if context == "class" and text in _ACCESS_KEYWORDS:
                 colon = self._next_significant(current + 1, end)
-                if colon is not None and self.lexemes[colon].text == ":":
+                if colon is not None and texts[colon] == ":":
                     node = self._compose("access_specifier", current, colon + 1, [])
-                    result.append(_Replacement(current, colon + 1, node))
+                    result.append((current, colon + 1, node, None))
                     cursor = colon + 1
                     continue
 
@@ -215,69 +303,152 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
             if replacement is not None:
                 result.append(replacement)
             cursor = unit_end
+        self._depth -= 1
         return _deduplicate_replacements(result)
+
+    def _find_unit_end(self, start: int, end: int, *, context: str) -> int:
+        """从当前 unit 起点向后扫描到顶层声明/语句边界。
+        Scan forward from one unit start until its top-level declaration/statement boundary.
+        """
+        first = self._next_significant(start, end)
+        if first is None:
+            return end
+        texts = self._texts
+        first_text = texts[first]
+        if first_text in _CONTROL_OR_DO:
+            return self._control_unit_end(first, end)
+
+        stext = self._stext
+        sig = self._sig
+        pairs = self._pairs
+        depth_round = depth_square = 0
+        low, high = self._span(first, end)
+        position = low
+        while position < high:
+            text = stext[position]
+            if text not in _UNIT_DELIMITERS:
+                position += 1
+                continue
+            if text == "(" or text == "[":
+                if not (depth_round or depth_square):
+                    skipped = self._skip_group(position, high)
+                    if skipped != position + 1:
+                        position = skipped
+                        continue
+                if text == "(":
+                    depth_round += 1
+                else:
+                    depth_square += 1
+            elif text == ")":
+                depth_round = max(0, depth_round - 1)
+            elif text == "]":
+                depth_square = max(0, depth_square - 1)
+            elif depth_round == 0 and depth_square == 0:
+                index = sig[position]
+                if text == ";":
+                    return index + 1
+                if index in pairs:
+                    close = pairs[index]
+                    if first_text in ("class", "struct", "union", "enum"):
+                        semicolon = self._next_significant(close + 1, end)
+                        return (
+                            semicolon + 1
+                            if semicolon is not None and texts[semicolon] == ";"
+                            else close + 1
+                        )
+                    # direct-list initialization 要继续找到 ;，函数/namespace 则在 } 结束。
+                    # Direct-list initialization continues through the semicolon, while function
+                    # and namespace bodies end at the closing brace.
+                    if (
+                        position > low
+                        and stext[position - 1] not in (")", "try", "else", "do")
+                        and first_text not in ("namespace", "extern")
+                    ):
+                        semicolon = self._next_significant(close + 1, end)
+                        if semicolon is not None and texts[semicolon] == ";":
+                            return semicolon + 1
+                    return close + 1
+            position += 1
+        return end
+
+    def _control_unit_end(self, start: int, end: int) -> int:
+        """寻找控制流语句末尾，避免把 body 内分号误当外层结束。
+        Find the end of a control-flow statement without treating body semicolons as the outer terminator.
+        """
+        texts = self._texts
+        pairs = self._pairs
+        cursor = start + 1
+        open_paren = self._next_significant(cursor, end)
+        if open_paren is not None and texts[open_paren] == "(" and open_paren in pairs:
+            cursor = pairs[open_paren] + 1
+        body = self._next_significant(cursor, end)
+        if body is None:
+            return end
+        if texts[body] == "{" and body in pairs:
+            result = pairs[body] + 1
+        else:
+            result = self._find_unit_end(body, end, context="block")
+        if texts[start] == "if":
+            else_index = self._next_significant(result, end)
+            if else_index is not None and texts[else_index] == "else":
+                else_body = self._next_significant(else_index + 1, end)
+                if else_body is not None and texts[else_body] == "{" and else_body in pairs:
+                    result = pairs[else_body] + 1
+                elif else_body is not None:
+                    result = self._find_unit_end(else_body, end, context="block")
+        return result
 
     def _parse_preprocessor(self, start: int, end: int) -> _Replacement:
         """解析一条逻辑预处理行，并对 #include 暴露 path field。
         Parse one logical preprocessor line and expose a path field for #include.
         """
+        texts = self._texts
+        infos = self._infos
         line_end = start + 1
         while line_end < end:
-            item = self.lexemes[line_end]
-            if item.kind == "newline":
+            if infos[line_end][0] == "newline":
                 previous = line_end - 1
-                while previous >= start and self.lexemes[previous].trivia:
+                while previous >= start and infos[previous][2]:
                     previous -= 1
                 # 反斜杠续行仍属于同一条逻辑预处理指令，不能在物理换行处
                 # 提前结束，否则宏 body 会被误当成普通 translation-unit 源码。
-                continued = previous >= start and self.lexemes[previous].text == "\\"
+                # A backslash continuation stays in the same logical directive; ending at the
+                # physical line break would turn the macro body into translation-unit source.
                 line_end += 1
-                if continued:
+                if previous >= start and texts[previous] == "\\":
                     continue
                 break
             line_end += 1
 
-        significant = self._significant(start, line_end)
-        keyword = self.lexemes[significant[1]].text if len(significant) > 1 else ""
-        kind = {
-            "include": "preproc_include",
-            "define": "preproc_def",
-            "if": "preproc_if",
-            "ifdef": "preproc_ifdef",
-            "ifndef": "preproc_ifdef",
-        }.get(keyword, "preproc_call")
+        low, high = self._span(start, line_end)
+        kind = _PREPROCESSOR_KINDS.get(
+            self._stext[low + 1] if high - low > 1 else "", "preproc_call"
+        )
         replacements: list[_Replacement] = []
-
-        if kind == "preproc_include" and len(significant) > 2:
-            path_start = significant[2]
-            if self.lexemes[path_start].text == "<":
+        if kind == "preproc_include" and high - low > 2:
+            path_start = self._sig[low + 2]
+            if texts[path_start] == "<":
                 path_end = path_start + 1
-                while path_end < line_end and self.lexemes[path_end].text != ">":
+                while path_end < line_end and texts[path_end] != ">":
                     path_end += 1
                 if path_end < line_end:
                     path_end += 1
-                    text = self._text(path_start, path_end)
-                    replacements.append(
-                        _Replacement(
-                            path_start,
-                            path_end,
-                            GreenToken("system_lib_string", text, named=True),
-                            "path",
-                        )
-                    )
+                    path = _token("system_lib_string", self._text(path_start, path_end), True)
+                    replacements.append((path_start, path_end, path, "path"))
             else:
-                token = self.lexemes[path_start]
-                replacements.append(_Replacement(path_start, path_start + 1, token.green(), "path"))
+                replacements.append(
+                    (path_start, path_start + 1, self._plain[path_start].element, "path")
+                )
 
         node = self._compose(kind, start, line_end, replacements)
-        return _Replacement(start, line_end, node)
+        return (start, line_end, node, None)
 
     def _parse_template(self, start: int, end: int, *, context: str) -> _Replacement | None:
         """解析 template<...> 及其紧随的声明。
         Parse template<...> together with the declaration that immediately follows it.
         """
         open_angle = self._next_significant(start + 1, end)
-        if open_angle is None or self.lexemes[open_angle].text != "<":
+        if open_angle is None or self._texts[open_angle] != "<":
             return None
         close_angle = self._match_angle(open_angle, end)
         if close_angle is None:
@@ -291,7 +462,8 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
         if declaration_end <= declaration_start:
             return None
 
-        if self.lexemes[declaration_start].text in {"class", "struct", "union"}:
+        nested: _Replacement | None
+        if self._texts[declaration_start] in _CLASS_KEYWORDS:
             nested = self._parse_class(declaration_start, declaration_end)
         else:
             nested = self._parse_unit(declaration_start, declaration_end, context=context)
@@ -303,11 +475,11 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
             start,
             declaration_end,
             [
-                _Replacement(open_angle, close_angle + 1, parameters, "parameters"),
-                _Replacement(nested.start, nested.end, nested.element),
+                (open_angle, close_angle + 1, parameters, "parameters"),
+                (nested[0], nested[1], nested[2], None),
             ],
         )
-        return _Replacement(start, declaration_end, node)
+        return (start, declaration_end, node, None)
 
     def _parse_template_parameters(self, open_angle: int, close_angle: int) -> GreenNode:
         """把模板参数列表拆成带 name/default 的参数节点。
@@ -320,60 +492,45 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
             if self._next_significant(part_start, part_end) is None:
                 continue
             node = self._parse_parameter(part_start, part_end, template=True)
-            replacements.append(_Replacement(part_start, part_end, node))
-        return self._compose(
-            "template_parameter_list",
-            open_angle,
-            close_angle + 1,
-            replacements,
-        )
+            replacements.append((part_start, part_end, node, None))
+        return self._compose("template_parameter_list", open_angle, close_angle + 1, replacements)
 
     def _parse_class(self, start: int, end: int) -> _Replacement | None:
         """解析 class/struct/union 定义并递归解析成员列表；不是定义时返回 None。
         Parse a class/struct/union definition and recursively parse its member list; None when
         the keyword does not start a definition.
         """
-        keyword = self.lexemes[start].text
-        head = self._class_head(self._significant(start + 1, end))
+        low, high = self._span(start + 1, end)
+        head = self._class_head(low, high)
         if head is None:
             return None
         name, open_brace = head
-        if open_brace not in self._pairs:
-            return None
-        close_brace = self._pairs[open_brace]
+        close_brace = self._pairs.get(open_brace, end)
         if close_brace >= end:
             return None
 
         body_replacements = self._parse_scope(open_brace + 1, close_brace, context="class")
         body = self._compose(
-            "field_declaration_list",
-            open_brace,
-            close_brace + 1,
-            body_replacements,
+            "field_declaration_list", open_brace, close_brace + 1, body_replacements
         )
-        replacements = [_Replacement(open_brace, close_brace + 1, body, "body")]
+        replacements: list[_Replacement] = [(open_brace, close_brace + 1, body, "body")]
         if name is not None:
             first, last = name
             element: GreenElement = (
-                GreenToken("type_identifier", self.lexemes[first].text, named=True)
+                _token("type_identifier", self._texts[first], True)
                 if first == last
                 else self._compose("qualified_identifier", first, last + 1, [])
             )
-            replacements.append(_Replacement(first, last + 1, element, "name"))
-        kind = {
-            "class": "class_specifier",
-            "struct": "struct_specifier",
-            "union": "union_specifier",
-        }[keyword]
+            replacements.append((first, last + 1, element, "name"))
         class_end = close_brace + 1
-        node = self._compose(kind, start, class_end, replacements)
+        node = self._compose(_CLASS_KINDS[self._texts[start]], start, class_end, replacements)
 
         # 普通顶层/成员 class 声明的分号不属于 specifier；保持与原 view 兼容。
         # Keep the semicolon of a normal top-level/member class declaration outside the
         # specifier to preserve compatibility with the existing views.
-        return _Replacement(start, class_end, node)
+        return (start, class_end, node, None)
 
-    def _class_head(self, significant: list[int]) -> tuple[tuple[int, int] | None, int] | None:
+    def _class_head(self, low: int, high: int) -> tuple[tuple[int, int] | None, int] | None:
         """识别类头：属性、可带 :: 限定和模板实参的类名（名前的宏名跳过）、final、基类列表，
         直到类体的 {。不是类定义（前向声明、详细类型说明符、函数）时返回 None。
         Recognize a class head: attributes, a class name that may be ::-qualified and carry
@@ -381,93 +538,99 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
         the { of the body. None when the keyword does not start a definition (a forward
         declaration, an elaborated type specifier, a function).
 
+        Args:
+            low: 类关键字之后第一个有效 lexeme 的位置。
+                The position of the first significant lexeme after the class keyword.
+            high: 作用域末尾对应的位置。
+                The position matching the end of the scope.
+
         Returns:
             ((类名第一个 token, 最后一个 token) 或匿名类为 None, 类体 { 的下标)。
             ((first token, last token) of the class name, or None for an anonymous class,
             index of the body's {).
         """
-        position = self._skip_class_attributes(significant, 0)
+        sig = self._sig
+        stext = self._stext
+        infos = self._infos
+        position = self._skip_class_attributes(low, high, low)
         name: tuple[int, int] | None = None
-        while position < len(significant):
-            index = significant[position]
-            lexeme = self.lexemes[index]
-            if lexeme.kind != "identifier" or lexeme.text == "final":
+        while position < high:
+            index = sig[position]
+            if infos[index][0] != "identifier" or stext[position] == "final":
                 break
             # 名字序列：identifier (<...>)? (:: identifier (<...>)?)*；最后一段才是类名。
             # A name sequence: identifier (<...>)? (:: identifier (<...>)?)*.
             first = last = index
             position += 1
-            while position < len(significant):
-                following = self.lexemes[significant[position]]
-                if following.text == "<":
-                    closing = self._match_angle(significant[position], significant[-1] + 1)
+            while position < high:
+                following = stext[position]
+                if following == "<":
+                    closing = self._match_angle(sig[position], sig[high - 1] + 1)
                     if closing is None:
                         return None
-                    while position < len(significant) and significant[position] <= closing:
+                    while position < high and sig[position] <= closing:
                         position += 1
                     continue
                 if (
-                    following.text == "::"
-                    and position + 1 < len(significant)
-                    and self.lexemes[significant[position + 1]].kind == "identifier"
+                    following == "::"
+                    and position + 1 < high
+                    and infos[sig[position + 1]][0] == "identifier"
                 ):
-                    last = significant[position + 1]
+                    last = sig[position + 1]
                     position += 2
                     continue
                 break
             # 名字前的 identifier（导出宏）不属于类名，下一个 identifier 才是。
             # An identifier before the name (an export macro) is not the class name.
             name = (first, last)
-            position = self._skip_class_attributes(significant, position)
-        if position < len(significant) and self.lexemes[significant[position]].text == "final":
+            position = self._skip_class_attributes(low, high, position)
+        if position < high and stext[position] == "final":
             position += 1
-        if position >= len(significant):
+        if position >= high:
             return None
-        text = self.lexemes[significant[position]].text
+        text = stext[position]
         if text == "{":
-            return name, significant[position]
+            return name, sig[position]
         if text != ":":
             return None
         # 基类列表：直到顶层的 {；其中出现顶层 ; 说明这不是类定义。
         # The base clause runs to the top-level {; a top-level ; means this is no definition.
         depth = 0
-        for index in significant[position + 1 :]:
-            text = self.lexemes[index].text
+        for base in range(position + 1, high):
+            text = stext[base]
             if text in ("(", "["):
                 depth += 1
             elif text in (")", "]"):
                 depth -= 1
             elif depth == 0 and text == "{":
-                return name, index
+                return name, sig[base]
             elif depth == 0 and text == ";":
                 return None
         return None
 
-    def _skip_class_attributes(self, significant: list[int], position: int) -> int:
+    def _skip_class_attributes(self, low: int, high: int, position: int) -> int:
         """跳过 [[...]]、alignas(...)、__attribute__((...)) 和 __declspec(...)，返回其后的位置。
         Skip [[...]], alignas(...), __attribute__((...)) and __declspec(...) and return the
         position after them.
         """
-        while position < len(significant):
-            index = significant[position]
-            lexeme = self.lexemes[index]
+        sig = self._sig
+        stext = self._stext
+        pairs = self._pairs
+        while position < high:
+            index = sig[position]
+            text = stext[position]
+            following = stext[position + 1] if position + 1 < high else None
             skip_to = None
-            if lexeme.text == "[" and index in self._pairs:
-                following = significant[position + 1] if position + 1 < len(significant) else None
-                if following is None or self.lexemes[following].text != "[":
+            if text == "[" and index in pairs:
+                if following != "[":
                     return position
-                skip_to = self._pairs[index]
-            elif lexeme.kind == "identifier" and lexeme.text in (
-                "alignas",
-                "__attribute__",
-                "__declspec",
-            ):
-                following = significant[position + 1] if position + 1 < len(significant) else None
-                if following is not None and self.lexemes[following].text == "(":
-                    skip_to = self._pairs.get(following)
+                skip_to = pairs[index]
+            elif text in _CLASS_ATTRIBUTE_WORDS and self._infos[index][0] == "identifier":
+                if following == "(":
+                    skip_to = pairs.get(sig[position + 1])
             if skip_to is None:
                 return position
-            while position < len(significant) and significant[position] <= skip_to:
+            while position < high and sig[position] <= skip_to:
                 position += 1
         return position
 
@@ -475,19 +638,35 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
         """解析 namespace body，使内部声明仍可结构化查询。
         Parse a namespace body so declarations inside remain structurally queryable.
         """
-        significant = self._significant(start + 1, end)
-        open_brace = next((i for i in significant if self.lexemes[i].text == "{"), None)
-        if open_brace is None or open_brace not in self._pairs:
+        low, high = self._span(start + 1, end)
+        try:
+            open_position = self._stext.index("{", low, high)
+        except ValueError:
+            return None
+        open_brace = self._sig[open_position]
+        if open_brace not in self._pairs:
             return None
         close_brace = self._pairs[open_brace]
         replacements = self._parse_scope(open_brace + 1, close_brace, context="top")
         body = self._compose("declaration_list", open_brace, close_brace + 1, replacements)
-        nested: list[_Replacement] = [_Replacement(open_brace, close_brace + 1, body, "body")]
-        name = next(
-            (i for i in significant if i < open_brace and self.lexemes[i].kind == "identifier"),
-            None,
-        )
-        if name is not None:
-            nested.append(_Replacement(name, name + 1, self.lexemes[name].green(), "name"))
+        nested: list[_Replacement] = [(open_brace, close_brace + 1, body, "body")]
+        for position in range(low, open_position):
+            name = self._sig[position]
+            if self._infos[name][0] == "identifier":
+                nested.append((name, name + 1, self._plain[name].element, "name"))
+                break
         node = self._compose("namespace_definition", start, close_brace + 1, nested)
-        return _Replacement(start, close_brace + 1, node)
+        return (start, close_brace + 1, node, None)
+
+
+def _nesting_limit() -> int:
+    """当前调用栈下可安全使用的嵌套层数。
+    The nesting depth that can be used safely from the current call stack.
+    """
+    depth = 0
+    frame = sys._getframe()
+    while frame is not None:
+        depth += 1
+        frame = frame.f_back  # type: ignore[assignment]
+    available = sys.getrecursionlimit() - depth - _RESERVED_FRAMES
+    return max(1, min(_MAX_NESTING, available // _FRAMES_PER_NESTING))

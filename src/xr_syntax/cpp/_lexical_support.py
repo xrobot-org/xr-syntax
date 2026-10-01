@@ -4,16 +4,14 @@ Internal helpers shared by C++ lexical-query modules.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-
-from .lexer import _Lexeme
+from .lexer import _Lexed
 
 # ---------------------------------------------------------------------------
 # 模块实现：C++ 词法查询共享的内部辅助函数。
 # ---------------------------------------------------------------------------
 
 
-def _preprocessor_mask(lexemes: Sequence[_Lexeme]) -> list[bool]:
+def _preprocessor_mask(lexed: _Lexed) -> list[bool]:
     """每个 lexeme 是否位于预处理逻辑行（从 # 开始，含反斜杠续行）。
     Whether each lexeme belongs to a preprocessor logical line (from a # on, continuation
     lines included).
@@ -22,18 +20,20 @@ def _preprocessor_mask(lexemes: Sequence[_Lexeme]) -> list[bool]:
     One forward pass: when the last non-whitespace lexeme before a line ending is a
     backslash, the logical line continues on the next line.
     """
+    texts = lexed.texts
+    if "#" not in texts:
+        return [False] * len(texts)
     mask = []
     directive = False
     last_text = None
-    for item in lexemes:
-        if item.trivia:
-            line_end = "\n" in item.text or "\r" in item.text
-            if line_end and last_text != "\\":
+    for text, info in zip(texts, lexed.infos, strict=True):
+        if info[2]:
+            if directive and last_text != "\\" and ("\n" in text or "\r" in text):
                 directive = False
             mask.append(directive)
             continue
-        if item.kind != "comment" and item.text == "#":
+        if text == "#" and info[0] != "comment":
             directive = True
         mask.append(directive)
-        last_text = item.text
+        last_text = text
     return mask

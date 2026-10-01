@@ -50,7 +50,7 @@ class GreenTrivia(_GreenMixin):
         """
         return self.text
 
-    @property
+    @cached_property
     def byte_width(self) -> int:
         """返回该 trivia 按源码编码后的字节宽度。
         Return the encoded source width in bytes.
@@ -77,7 +77,7 @@ class GreenToken(_GreenMixin):
         """
         return self.text
 
-    @property
+    @cached_property
     def byte_width(self) -> int:
         """返回该 token 按源码编码后的字节宽度。
         Return the encoded source width in bytes.
@@ -120,8 +120,19 @@ class GreenNode(_GreenMixin):
     def render(self) -> str:
         """按 children 顺序拼接并渲染当前节点代表的完整源码。
         Render this represented source without normalization.
+
+        用显式栈遍历，树再深也不会递归。
+        Walks with an explicit stack, so no tree is too deep for it.
         """
-        return "".join(child.element.render() for child in self.children)
+        parts: list[str] = []
+        stack: list[GreenElement] = [self]
+        while stack:
+            element = stack.pop()
+            if isinstance(element, GreenNode):
+                stack += [child.element for child in reversed(element.children)]
+            else:
+                parts.append(element.text)
+        return "".join(parts)
 
     @cached_property
     def byte_width(self) -> int:
@@ -235,9 +246,10 @@ def _child(element: GreenElement, field: str | None = None) -> GreenChild:
     return child
 
 
-def _node(kind: str, children: tuple[GreenChild, ...]) -> GreenNode:
-    """与 GreenNode(kind, children, named=True) 相等的节点。
-    A node equal to GreenNode(kind, children, named=True).
+def _node(kind: str, children: tuple[GreenChild, ...], byte_width: int | None = None) -> GreenNode:
+    """与 GreenNode(kind, children, named=True) 相等的节点；给出 byte_width 时不再从 children 求和。
+    A node equal to GreenNode(kind, children, named=True); with byte_width given it is not summed
+    from the children.
     """
     node = _new(GreenNode)
     fields = node.__dict__
@@ -246,4 +258,8 @@ def _node(kind: str, children: tuple[GreenChild, ...]) -> GreenNode:
     fields["named"] = True
     fields["missing"] = False
     fields["error"] = False
+    if byte_width is not None:
+        # 写进 cached_property 的缓存位置。
+        # Stored where the cached_property keeps its value.
+        fields["byte_width"] = byte_width
     return node

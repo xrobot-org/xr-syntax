@@ -6,12 +6,13 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from itertools import accumulate
 
 from xr_syntax.core import SourceSpan
 from xr_syntax.i18n import tr
 
 from ._lexical_support import _preprocessor_mask
-from .lexer import _LITERAL_KINDS, _Lexeme, _Lexer
+from .lexer import _LITERAL_KINDS, _Lexed, lex
 
 # ---------------------------------------------------------------------------
 # 模块实现：提供带字符/字节位置的公共 C++ 词法 token 查询。
@@ -35,35 +36,33 @@ def code_tokens(source: str) -> tuple[CppLexicalToken, ...]:
     """返回实际 C++ 代码 token，跳过 trivia、注释和预处理逻辑行。
     Return C++ code tokens while excluding trivia, comments, and preprocessor logical lines.
     """
-    lexemes, diagnostics = _Lexer(source).scan()
-    if diagnostics:
-        raise ValueError(diagnostics[0].message)
-    return _code_tokens_of(lexemes)
+    lexed = lex(source)
+    if lexed.diagnostics:
+        raise ValueError(lexed.diagnostics[0].message)
+    return _code_tokens_of(lexed)
 
 
-def _code_tokens_of(lexemes: Sequence[_Lexeme]) -> tuple[CppLexicalToken, ...]:
-    """由 lexeme 序列得到代码 token；字符位置由各 lexeme 的文本长度累加得出。
-    The code tokens of a lexeme sequence; character positions add up the lexemes' text
-    lengths.
+def _code_tokens_of(lexed: _Lexed) -> tuple[CppLexicalToken, ...]:
+    """由词法结果得到代码 token；字符位置由各 lexeme 的文本长度累加得出。
+    The code tokens of a lexing result; character positions add up the lexemes' text lengths.
     """
-    directives = _preprocessor_mask(lexemes)
-    result = []
-    char_offset = 0
-    for item, directive in zip(lexemes, directives, strict=True):
-        start = char_offset
-        char_offset += len(item.text)
-        if item.trivia or directive or item.kind == "comment":
-            continue
-        result.append(
-            CppLexicalToken(
-                item.text,
-                start,
-                char_offset,
-                _public_kind(item.kind),
-                SourceSpan(item.start, item.end),
-            )
+    directives = _preprocessor_mask(lexed)
+    texts = lexed.texts
+    offsets = lexed.offsets
+    characters = list(accumulate(map(len, texts), initial=0))
+    return tuple(
+        CppLexicalToken(
+            text,
+            characters[index],
+            characters[index + 1],
+            _public_kind(info[0]),
+            SourceSpan(offsets[index], offsets[index + 1]),
         )
-    return tuple(result)
+        for index, (text, info, directive) in enumerate(
+            zip(texts, lexed.infos, directives, strict=True)
+        )
+        if not (info[2] or directive or info[0] == "comment")
+    )
 
 
 def matching_delimiter(tokens: Sequence[CppLexicalToken], start: int) -> int:

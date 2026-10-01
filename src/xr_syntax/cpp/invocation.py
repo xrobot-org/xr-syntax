@@ -4,14 +4,13 @@ Lexical queries for macro-like NAME(...) invocations and comma-delimited source 
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass
 
 from xr_syntax.core import SourceSpan, SyntaxTree, decode_source
 from xr_syntax.i18n import tr
 
 from ._lexical_support import _preprocessor_mask
-from .lexer import _Lexeme, _Lexer
+from .lexer import _Lexed, _Lexeme, lex
 
 # ---------------------------------------------------------------------------
 # 模块实现：提供宏式 NAME(...) invocation 的词法查询和逗号列表切分。
@@ -76,10 +75,10 @@ def split_source_list(source: str, *, template_angles: bool = False) -> tuple[st
     """按顶层逗号切分源码列表，并按需把模板角括号视为嵌套。
     Split source on top-level commas, optionally treating template angles as nesting.
     """
-    lexemes, diagnostics = _Lexer(source).scan()
-    if diagnostics:
-        raise ValueError(diagnostics[0].message)
-    significant = [item for item in lexemes if not item.trivia and item.kind != "comment"]
+    lexed = lex(source)
+    if lexed.diagnostics:
+        raise ValueError(lexed.diagnostics[0].message)
+    significant = [item for item in lexed.lexemes() if not item.trivia and item.kind != "comment"]
     if not significant:
         return ()
     separators, balanced = _top_level_commas(significant, template_angles=template_angles)
@@ -105,34 +104,36 @@ def identifier_occurrences(source: str) -> tuple[CppIdentifierOccurrence, ...]:
     """返回代码中的 identifier occurrence，忽略注释和预处理逻辑行。
     Return identifier occurrences outside comments and preprocessor logical lines.
     """
-    lexemes, diagnostics = _Lexer(source).scan()
-    if diagnostics:
-        raise ValueError(diagnostics[0].message)
-    return _identifier_occurrences_of(lexemes)
+    lexed = lex(source)
+    if lexed.diagnostics:
+        raise ValueError(lexed.diagnostics[0].message)
+    return _identifier_occurrences_of(lexed)
 
 
-def _identifier_occurrences_of(
-    lexemes: Sequence[_Lexeme],
-) -> tuple[CppIdentifierOccurrence, ...]:
-    """lexeme 序列中的 identifier occurrence，忽略注释和预处理逻辑行。
-    The identifier occurrences of a lexeme sequence outside comments and preprocessor
-    logical lines.
+def _identifier_occurrences_of(lexed: _Lexed) -> tuple[CppIdentifierOccurrence, ...]:
+    """词法结果中的 identifier occurrence，忽略注释和预处理逻辑行。
+    The identifier occurrences of a lexing result outside comments and preprocessor logical
+    lines.
     """
-    directives = _preprocessor_mask(lexemes)
+    directives = _preprocessor_mask(lexed)
+    texts = lexed.texts
+    infos = lexed.infos
+    offsets = lexed.offsets
     significant = [
-        (index, item)
-        for index, item in enumerate(lexemes)
-        if not item.trivia and item.kind != "comment" and not directives[index]
+        index
+        for index, (info, directive) in enumerate(zip(infos, directives, strict=True))
+        if not (info[2] or directive or info[0] == "comment")
     ]
+    last = len(significant) - 1
     result = []
-    for position, (_, item) in enumerate(significant):
-        if item.kind != "identifier":
+    for position, index in enumerate(significant):
+        if infos[index][0] != "identifier":
             continue
-        previous = significant[position - 1][1].text if position else None
-        following = significant[position + 1][1].text if position + 1 < len(significant) else None
+        previous = texts[significant[position - 1]] if position else None
+        following = texts[significant[position + 1]] if position < last else None
         result.append(
             CppIdentifierOccurrence(
-                item.text, SourceSpan(item.start, item.end), previous, following
+                texts[index], SourceSpan(offsets[index], offsets[index + 1]), previous, following
             )
         )
     return tuple(result)
@@ -145,42 +146,35 @@ def find_invocations(
     name: str,
     *,
     template_angles: bool = False,
-    lexemes: Sequence[_Lexeme] | None = None,
+    lexed: _Lexed | None = None,
 ) -> tuple[CppInvocationView, ...]:
     """在语法快照中查找指定 NAME(...) invocation。
     Find lexical NAME(...) invocations in one syntax-tree snapshot.
 
     Args:
-        lexemes: tree 源码的 lexeme；没有时重新切分。
-            The lexemes of the tree's source; the source is lexed again without them.
+        lexed: tree 源码的词法结果；没有时重新切分。
+            The lexing result of the tree's source; the source is lexed again without it.
     """
-    if lexemes is None:
-        lexemes, _ = _Lexer(tree.render()).scan()
-    significant = [
-        (index, item)
-        for index, item in enumerate(lexemes)
-        if not item.trivia and item.kind != "comment"
-    ]
-    positions = {index: position for position, (index, _) in enumerate(significant)}
-    directives = _preprocessor_mask(lexemes)
+    if lexed is None:
+        lexed = lex(tree.render())
+    texts = lexed.texts
+    if name not in texts:
+        return ()
+    infos = lexed.infos
+    offsets = lexed.offsets
+    directives = _preprocessor_mask(lexed)
     encoded = tree.render_bytes()
     result = []
-    for index, item in significant:
-        if item.kind != "identifier" or item.text != name:
+    for index, text in enumerate(texts):
+        if text != name or infos[index][0] != "identifier" or directives[index]:
             continue
-        if directives[index]:
+        open_index = _next_code(lexed, index + 1)
+        if open_index is None or texts[open_index] != "(":
             continue
-        position = positions[index]
-        if position + 1 >= len(significant):
-            continue
-        open_index, opening = significant[position + 1]
-        if opening.text != "(":
-            continue
-        close_index = _matching_paren(lexemes, open_index)
+        close_index = _matching_paren(lexed, open_index)
         if close_index is None:
             continue
-        closing = lexemes[close_index]
-        inner = decode_source(encoded[opening.end : closing.start])
+        inner = decode_source(encoded[offsets[open_index + 1] : offsets[close_index]])
         arguments = (
             split_source_list(inner, template_angles=template_angles) if inner.strip() else ()
         )
@@ -188,25 +182,38 @@ def find_invocations(
             CppInvocationView(
                 tree,
                 name,
-                SourceSpan(item.start, closing.end),
+                SourceSpan(offsets[index], offsets[close_index + 1]),
                 arguments,
             )
         )
     return tuple(result)
 
 
-def _matching_paren(lexemes: Sequence[_Lexeme], opening: int) -> int | None:
+def _next_code(lexed: _Lexed, start: int) -> int | None:
+    """从 start 起第一个不是空白、也不是注释的 lexeme。
+    The first lexeme from start on that is neither whitespace nor a comment.
+    """
+    infos = lexed.infos
+    for index in range(start, len(infos)):
+        info = infos[index]
+        if not info[2] and info[0] != "comment":
+            return index
+    return None
+
+
+def _matching_paren(lexed: _Lexed, opening: int) -> int | None:
     """匹配词法 invocation 的外层圆括号。
     Match the outer parenthesis of a lexical invocation.
     """
+    texts = lexed.texts
+    infos = lexed.infos
     depth = 0
-    for index in range(opening, len(lexemes)):
-        item = lexemes[index]
-        if item.trivia or item.kind == "comment":
-            continue
-        if item.text == "(":
-            depth += 1
-        elif item.text == ")":
+    for index in range(opening, len(texts)):
+        text = texts[index]
+        if text == "(":
+            if infos[index][0] != "comment":
+                depth += 1
+        elif text == ")" and infos[index][0] != "comment":
             depth -= 1
             if depth == 0:
                 return index

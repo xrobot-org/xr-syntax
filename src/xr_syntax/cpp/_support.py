@@ -4,30 +4,69 @@ Strict internal typing contract shared by the native C++ parser mixins.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
-from typing import TYPE_CHECKING
-
-from xr_syntax.core import Diagnostic, GreenElement, GreenNode
-
-from .lexer import _Lexeme
+from xr_syntax.core import Diagnostic, GreenChild, GreenElement, GreenNode
 
 # ---------------------------------------------------------------------------
 # 模块实现：Native C++ parser 各结构阶段共享的严格类型合同。
 # ---------------------------------------------------------------------------
 
-if TYPE_CHECKING:
-    from ._ranges import _Replacement
+# (start, end, element, field)：用 element 替换 lexeme 区间 [start, end)，边上带 field。
+# (start, end, element, field): element replaces the lexeme range [start, end), with field on the
+# edge.
+_Replacement = tuple[int, int, GreenElement, "str | None"]
 
 
 class _ParserSupport:
-    """描述 native parser mixin 之间互相依赖的内部接口。
-    Describe the internal interface shared by native parser mixins.
+    """描述 native parser mixin 之间互相依赖的内部状态和接口。
+    Describe the internal state and interface shared by native parser mixins.
+
+    Attributes:
+        _texts: 每个 lexeme 的文本。
+            The text of each lexeme.
+        _infos: 每个 lexeme 的 (kind, named, trivia)。
+            The (kind, named, trivia) of each lexeme.
+        _offsets: 每个 lexeme 起点的字节位置，最后一项是源码总字节数。
+            The byte position where each lexeme starts; the last item is the source size.
+        _count: lexeme 个数。
+            The number of lexemes.
+        _sig: 有效 lexeme（非空白、非注释）的下标，按顺序排列。
+            The indices of the significant lexemes (not whitespace, not comments), in order.
+        _stext: 有效 lexeme 的文本，与 _sig 一一对应。
+            The texts of the significant lexemes, parallel to _sig.
+        _rank: _rank[i] 是下标 i 之前的有效 lexeme 个数（长度为 lexeme 个数加一）。
+            _rank[i] is the number of significant lexemes before index i (one longer than the
+            lexemes).
+        _plain: 每个 lexeme 的 green 叶子边。
+            The green leaf edge of each lexeme.
+        _pairs: 已配对的开括号下标到闭括号下标。
+            Paired opening delimiter index to closing delimiter index.
+        _reverse_pairs: 闭括号下标到开括号下标。
+            Closing delimiter index to opening delimiter index.
+        _dirty: 组内含有多余闭括号的开括号下标。
+            Opening delimiters whose group contains a stray closing delimiter.
+        diagnostics: 词法和结构诊断。
+            Lexer and structural diagnostics.
     """
 
-    lexemes: Sequence[_Lexeme]
-    diagnostics: list[Diagnostic]
+    _texts: list[str]
+    _infos: list[tuple[str, bool, bool]]
+    _offsets: list[int]
+    _count: int
+    _sig: list[int]
+    _stext: list[str]
+    _rank: list[int]
+    _plain: list[GreenChild]
     _pairs: dict[int, int]
     _reverse_pairs: dict[int, int]
+    _dirty: set[int]
+    _depth: int
+    diagnostics: list[Diagnostic]
+
+    def _span(self, start: int, end: int) -> tuple[int, int]:
+        """lexeme 区间内有效 lexeme 的位置范围。
+        The position range of the significant lexemes in a lexeme range.
+        """
+        raise NotImplementedError
 
     def _significant(self, start: int, end: int) -> list[int]:
         """返回区间内非 trivia/comment 的 lexeme 索引。
@@ -44,6 +83,12 @@ class _ParserSupport:
     def _previous_significant(self, start: int, lower_bound: int) -> int | None:
         """向左寻找上一个有效 lexeme。
         Find the previous non-trivia, non-comment lexeme to the left.
+        """
+        raise NotImplementedError
+
+    def _skip_group(self, position: int, high: int) -> int:
+        """跳过从 position 开始的配对括号组。
+        Skip the paired delimiter group that starts at position.
         """
         raise NotImplementedError
 
@@ -106,16 +151,28 @@ class _ParserSupport:
         kind: str,
         start: int,
         end: int,
-        replacements: Iterable[_Replacement],
+        replacements: list[_Replacement],
     ) -> GreenNode:
         """把不重叠 replacement 组合成 green node。
         Compose non-overlapping structured replacements into a GreenNode while preserving untouched source.
         """
         raise NotImplementedError
 
-    def _lowest_precedence_operator(self, start: int, end: int) -> int | None:
-        """查找顶层最低优先级运算符。
-        Find the top-level binary or assignment operator with the weakest binding precedence.
+    def _diagnostic(self, message: str, start: int, end: int) -> None:
+        """记录结构诊断。
+        Record a structural diagnostic.
+        """
+        raise NotImplementedError
+
+    def _enter(self, start: int, end: int) -> bool:
+        """进入一层嵌套；超过嵌套上限时返回 False。
+        Enter one nesting level; False when the nesting limit is exceeded.
+        """
+        raise NotImplementedError
+
+    def _find_unit_end(self, start: int, end: int, *, context: str) -> int:
+        """寻找当前声明/语句单元的结束位置。
+        Find where the current declaration/statement unit ends.
         """
         raise NotImplementedError
 
@@ -137,7 +194,9 @@ class _ParserSupport:
         """
         raise NotImplementedError
 
-    def _parse_expression(self, start: int, end: int) -> GreenElement:
+    def _parse_expression(
+        self, start: int, end: int, operators: list[tuple[int, int]] | None = None
+    ) -> GreenElement:
         """解析表达式结构。
         Parse common expression forms, falling back to source_expression when finer classification is unsafe.
         """
@@ -186,6 +245,12 @@ class _ParserSupport:
     def _parse_concept(self, start: int, end: int) -> _Replacement:
         """解析 concept 定义。
         Parse a concept definition and continue parsing the expression after =.
+        """
+        raise NotImplementedError
+
+    def _parse_parameter(self, start: int, end: int, *, template: bool) -> GreenNode:
+        """解析一个函数或模板参数。
+        Parse one function or template parameter.
         """
         raise NotImplementedError
 

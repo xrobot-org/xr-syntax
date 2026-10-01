@@ -8,7 +8,6 @@ import re
 from dataclasses import dataclass
 
 from xr_syntax.core import (
-    Diagnostic,
     SourceSpan,
     SyntaxDocument,
     SyntaxElement,
@@ -26,7 +25,7 @@ from .invocation import (
     _identifier_occurrences_of,
     find_invocations,
 )
-from .lexer import _Lexeme, _Lexer
+from .lexer import _Lexed, lex
 from .lexical import CppLexicalToken, _code_tokens_of
 from .parser import CppParser
 from .syntax_utils import declaration_name, field_text
@@ -78,7 +77,7 @@ class CppDocument(SyntaxDocument):
         self,
         tree: SyntaxTree,
         parser: SyntaxParserProtocol,
-        lexed: tuple[list[_Lexeme], list[Diagnostic]] | None = None,
+        lexed: _Lexed | None = None,
     ) -> None:
         """绑定语法树和解析器；lexed 是解析时的词法结果，没有时在首次用到时重新切分。
         Bind a syntax tree and parser; lexed is the lexing result of the parse, and without it
@@ -106,12 +105,12 @@ class CppDocument(SyntaxDocument):
         tree, lexed = selected._parse_lexed(source, source_name)
         return cls(tree, selected, lexed)
 
-    def _lexemes(self) -> tuple[list[_Lexeme], list[Diagnostic]]:
-        """文档源码的 lexeme 和 lexer 诊断。
-        The lexemes and lexer diagnostics of the document's source.
+    def _lexing(self) -> _Lexed:
+        """文档源码的词法结果（lexeme 和 lexer 诊断）。
+        The lexing result (lexemes and lexer diagnostics) of the document's source.
         """
         if self._lexed is None:
-            self._lexed = _Lexer(self.tree.render()).scan()
+            self._lexed = lex(self.tree.render())
         return self._lexed
 
     def code_tokens(self) -> tuple[CppLexicalToken, ...]:
@@ -122,10 +121,10 @@ class CppDocument(SyntaxDocument):
             ValueError: 源码有词法错误（未闭合的注释或字面量）。
                 The source has a lexical error (an unclosed comment or literal).
         """
-        lexemes, diagnostics = self._lexemes()
-        if diagnostics:
-            raise ValueError(diagnostics[0].message)
-        return _code_tokens_of(lexemes)
+        lexed = self._lexing()
+        if lexed.diagnostics:
+            raise ValueError(lexed.diagnostics[0].message)
+        return _code_tokens_of(lexed)
 
     def identifier_occurrences(self) -> tuple[CppIdentifierOccurrence, ...]:
         """与 identifier_occurrences(document.render()) 相同，复用解析时的词法结果。
@@ -135,10 +134,10 @@ class CppDocument(SyntaxDocument):
             ValueError: 源码有词法错误（未闭合的注释或字面量）。
                 The source has a lexical error (an unclosed comment or literal).
         """
-        lexemes, diagnostics = self._lexemes()
-        if diagnostics:
-            raise ValueError(diagnostics[0].message)
-        return _identifier_occurrences_of(lexemes)
+        lexed = self._lexing()
+        if lexed.diagnostics:
+            raise ValueError(lexed.diagnostics[0].message)
+        return _identifier_occurrences_of(lexed)
 
     def is_expression(self, element: SyntaxElement) -> bool:
         """依据 C++ grammar subtype 图判断元素是否属于 expression。
@@ -259,7 +258,7 @@ class CppDocument(SyntaxDocument):
         Find lexical NAME(...) invocations for macros and similar source constructs.
         """
         return find_invocations(
-            self.tree, name, template_angles=template_angles, lexemes=self._lexemes()[0]
+            self.tree, name, template_angles=template_angles, lexed=self._lexing()
         )
 
     # declaration 视图只按当前 syntax fields 识别变量 declarator。

@@ -34,6 +34,12 @@ High-level `CppDocument` and `CMakeDocument` edits reparse the modified source s
 C++ frontend 由 lexer、结构 parser 和 grammar contract 组成。lexer 保留换行、注释、literal、预处理内容和标点；结构 parser 在这些 lexeme 上建立 declaration、function、class、call、expression 等节点。  
 The C++ frontend consists of a lexer, structural parser, and grammar contract. The lexer preserves line endings, comments, literals, preprocessor text, and punctuation; the structural parser builds declaration, function, class, call, expression, and related nodes over those lexemes.
 
+lexer 用一次正则 `findall` 切出整个文件的 lexeme，结果以文本、kind 和字节位置的并列数组保存；文本相同的 green 叶子在多次解析之间共享。结构 parser 在有效 lexeme（非空白、非注释）的位置数组上扫描，已配对的括号组整组跳过。同一优先级的一串运算符用循环建树，左结合。  
+The lexer splits a whole file into lexemes with one regular-expression `findall` call and keeps them as parallel arrays of text, kind, and byte position; green leaves with the same text are shared across parses. The structural parser scans the position array of significant lexemes (not whitespace, not comments) and skips paired delimiter groups as a whole. A run of operators of one precedence is built in a loop, left-associatively.
+
+作用域和表达式的嵌套层数有上限：按调用时可用的 Python 递归深度计算，最多 100 层，实际源码最深约 22 层。更深的部分保留为未结构化源码并给出诊断，解析始终在 Python 递归上限之内完成。  
+Scope and expression nesting has a limit computed from the Python recursion depth available at the call, at most 100 levels; real source nests about 22 levels at most. Deeper source stays unstructured with a diagnostic, so parsing always stays within the Python recursion limit.
+
 ## CMake parser
 
 CMake frontend 直接解析 command、argument、comment 和成对 block，例如 `if()/endif()`、`function()/endfunction()`。它与 C++ frontend 一样包含在基础包中。  
