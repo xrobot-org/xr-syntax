@@ -5,6 +5,8 @@ and includes.
 
 from __future__ import annotations
 
+import pytest
+
 from xr_syntax.cpp import CppDocument
 
 
@@ -138,3 +140,103 @@ def test_include_views_give_the_header_and_its_form() -> None:
         ("local.hpp", False),
         ("vector", True),
     ]
+
+
+@pytest.mark.parametrize("label", ["public :", "public /* api */:", "public\n  :"])
+def test_an_access_label_may_hold_spaces_and_comments(label: str) -> None:
+    source = f"class A {{ {label} A(int x); }};"
+    assert _constructors(source, "A", public_only=True) == [["int x"]]
+
+
+@pytest.mark.parametrize(
+    ("parameters", "expected"),
+    [
+        pytest.param(
+            "int a = (1 < 2), int d = 3", ["int a = (1 < 2)", "int d = 3"], id="less-in-parens"
+        ),
+        pytest.param(
+            "A<(1 > 2), int> a, int b", ["A<(1 > 2), int> a", "int b"], id="greater-in-parens"
+        ),
+        pytest.param("void", [], id="void"),
+        pytest.param("int (&arr)[3]", ["int (&arr)[3]"], id="array-reference"),
+    ],
+)
+def test_constructor_parameters_are_split_at_top_level_commas(
+    parameters: str, expected: list[str]
+) -> None:
+    source = f"class B {{ public: B({parameters}); }};"
+    assert _constructors(source, "B") == [expected]
+
+
+def test_parameter_text_has_no_surrounding_whitespace() -> None:
+    source = "class C { public: C( int a,  char* b ) {} };"
+    constructor = CppDocument.parse(source).class_views("C")[0].constructors()[0]
+    assert [parameter.text for parameter in constructor.parameters] == ["int a", "char* b"]
+
+
+def test_unnamed_parameters_have_no_name_and_the_whole_type() -> None:
+    source = "class C { public: C(int, const uint8_t*, unsigned long, Foo&); };"
+    constructor = CppDocument.parse(source).class_views("C")[0].constructors()[0]
+    assert [(parameter.name, parameter.type) for parameter in constructor.parameters] == [
+        (None, "int"),
+        (None, "const uint8_t*"),
+        (None, "unsigned long"),
+        (None, "Foo&"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("source", "defaults"),
+    [
+        pytest.param(
+            "template <typename T = std::array<int, 2>> class X {};",
+            ["std::array<int, 2>"],
+            id="closing-shift",
+        ),
+        pytest.param(
+            "template <bool B = (1 > 2), typename T = int> class X {};",
+            ["(1 > 2)", "int"],
+            id="greater-in-parens",
+        ),
+    ],
+)
+def test_template_parameter_defaults_end_at_the_list_end(source: str, defaults: list[str]) -> None:
+    parameters = CppDocument.parse(source).class_views("X")[0].template_parameters
+    assert [item.default for item in parameters] == defaults
+
+
+@pytest.mark.parametrize(
+    "member",
+    [
+        pytest.param("int x_ = compute(y);", id="initialized-by-call"),
+        pytest.param("Foo bar_{make(z)};", id="brace-initialized-by-call"),
+        pytest.param("Callback (*callback_)(void*);", id="function-pointer"),
+        pytest.param("std::function<void()> handler_;", id="function-in-template-argument"),
+    ],
+)
+def test_data_members_are_not_functions(member: str) -> None:
+    source = f"class Cfg {{ public: Cfg(); {member} }};"
+    functions = CppDocument.parse(source).class_views("Cfg")[0].functions()
+    assert [function.name for function in functions] == ["Cfg"]
+
+
+def test_operator_and_parenthesized_names_are_function_names() -> None:
+    source = (
+        "class C { public: bool operator()(int) const; operator const char*() const;\n"
+        "  int& operator[](size_t i); bool operator<(const C&) const;\n"
+        "  static bool (isinf)(float x) { return false; } };"
+    )
+    functions = CppDocument.parse(source).class_views("C")[0].functions()
+    assert [function.name for function in functions] == [
+        "operator()",
+        "operator const char*",
+        "operator[]",
+        "operator<",
+        "isinf",
+    ]
+
+
+def test_brace_initializers_do_not_end_an_inline_constructor() -> None:
+    source = "class Led { public: Led(Gpio& g) : g_{g}, n_(1) { Run(); } void Run(); Gpio& g_; };"
+    functions = CppDocument.parse(source).class_views("Led")[0].functions()
+    assert [function.name for function in functions] == ["Led", "Run"]

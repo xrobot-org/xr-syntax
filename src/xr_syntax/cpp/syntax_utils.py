@@ -50,17 +50,7 @@ def declaration_name_element(node: SyntaxNode) -> SyntaxElement | None:
                 return found
         break
 
-    if current is not None:
-        return current
-
-    # `typename T` 这类类型模板参数没有 declarator field，需要单独识别名称。
-    # Type template parameters such as 'typename T' have no declarator field.
-    candidates = [
-        child
-        for child in node.named_syntax_children
-        if child.kind in {"identifier", "type_identifier"}
-    ]
-    return candidates[-1] if candidates else None
+    return current
 
 
 def declaration_name(node: SyntaxNode) -> str | None:
@@ -114,13 +104,10 @@ def declarator_name(element: SyntaxElement) -> str | None:
 
 
 def declaration_type_text(node: SyntaxNode) -> str | None:
-    """重建声明的源码级类型文本，同时排除名称和初始化器。
-    Reconstruct source-level type text without performing semantic type analysis.
+    """重建声明的源码级类型文本，同时排除名称和初始化器；没有名称时是 = 之前的全部文本。
+    Reconstruct source-level type text without the name and the initializer; without a name it
+    is all the text before the =.
     """
-    name = declaration_name_element(node)
-    if name is None:
-        return None
-
     end = node.span.end
     equal = next(
         (child for child in node.syntax_children if child.kind == "="),
@@ -130,7 +117,11 @@ def declaration_type_text(node: SyntaxNode) -> str | None:
         end = equal.span.start
 
     source = node.tree.render_bytes()
-    raw = source[node.span.start : name.span.start] + source[name.span.end : end]
+    name = declaration_name_element(node)
+    if name is None:
+        raw = source[node.span.start : end]
+    else:
+        raw = source[node.span.start : name.span.start] + source[name.span.end : end]
     return decode_source(raw).strip()
 
 

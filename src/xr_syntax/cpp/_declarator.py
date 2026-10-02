@@ -12,7 +12,23 @@ from .lexer import _CONTROL, _LITERAL_KINDS, _QUALIFIERS, _STORAGE, _TYPE_WORDS
 
 # 这些名字后面的括号不是函数参数列表。
 # Parentheses after these names are no function parameter list.
-_NOT_FUNCTION_NAMES = frozenset({"sizeof", "alignof", "decltype", "noexcept", "requires"})
+_NOT_FUNCTION_NAMES = frozenset(
+    {
+        "sizeof",
+        "alignof",
+        "alignas",
+        "decltype",
+        "noexcept",
+        "requires",
+        "explicit",
+        "static_assert",
+        "__attribute__",
+        "__declspec",
+    }
+)
+# 函数参数列表之前不会出现的顶层记号。
+# Top-level tokens that never come before a function parameter list.
+_DECLARATOR_STOPS = frozenset({"=", "{", ";"})
 _TYPE_STORAGE_QUALIFIER = frozenset(_TYPE_WORDS | _STORAGE | _QUALIFIERS)
 _DECLARATION_START = frozenset(
     _STORAGE
@@ -24,12 +40,38 @@ _DECLARATION_START = frozenset(
 # These operators before the name stop the declaration guess; pointer/reference punctuators belong
 # to the declarator.
 _EXPRESSION_OPERATORS = frozenset(
-    {"+", "-", "/", "%", "^", "|", "||", "and", "or", "xor", "?", "=", "==", "!=", "<=>"}
+    {
+        "+",
+        "-",
+        "/",
+        "%",
+        "^",
+        "|",
+        "||",
+        "and",
+        "or",
+        "xor",
+        "?",
+        "=",
+        "==",
+        "!=",
+        "<=>",
+        "<<",
+        ".",
+        "->",
+    }
 )
 _FUNCTION_SPECIFIERS = frozenset(
     _STORAGE | {"inline", "constexpr", "consteval", "extern", "friend", "virtual", "explicit"}
 )
 _ARGUMENT_OPERATORS = frozenset({"+", "-", "/", "%", "?"})
+_TYPE_KEYWORDS = frozenset({"class", "struct", "union", "enum"})
+# 后面括号里是属性的词。
+# Words whose following parentheses hold attributes.
+_ATTRIBUTE_WORDS = frozenset({"alignas", "__attribute__", "__declspec"})
+_ELABORATED = frozenset(_TYPE_KEYWORDS | {"typename"})
+_POINTER_OPERATORS = frozenset({"*", "&", "&&"})
+_OPENING = frozenset({"(", "[", "{"})
 _AFTER_VARIABLE_NAME = frozenset({"=", "(", "{", "[", ",", ";"})
 
 
@@ -45,50 +87,118 @@ class _DeclaratorMixin(_ParserSupport):
     ) -> tuple[int, int, int, int] | None:
         """找到声明中的主 function parameter list 及函数名区间。
         Locate the primary function parameter list and the source range of the function name.
+
+        参数列表在顶层的 =、{ 和 ; 之前（int x_ = compute(y); 和 Foo bar_{make(z)}; 都不是
+        函数），也不在模板实参里（std::function<void()> cb_; 不是函数）。
+        The parameter list comes before a top-level =, { and ; (neither int x_ = compute(y); nor
+        Foo bar_{make(z)}; is a function) and outside template arguments
+        (std::function<void()> cb_; is no function).
+
+        Returns:
+            (参数列表的 (, 其 ), 函数名起点, 函数名终点)，都是 lexeme 下标。
+            (the ( of the parameter list, its ), name start, name end), all lexeme indices.
         """
         stext = self._stext
         sig = self._sig
         pairs = self._pairs
         low, high = self._span(start, end)
+        angles = 0
         position = low
-        while True:
-            # list.index 在 C 里找下一个 (。
-            # list.index finds the next ( in C.
-            try:
-                position = stext.index("(", position, high)
-            except ValueError:
+        while position < high:
+            text = stext[position]
+            if text == "operator" and not angles:
+                return self._operator_parameter_list(position, high, end)
+            if text == "(":
+                index = sig[position]
+                close = pairs.get(index)
+                if not angles and close is not None and close < end and position != low:
+                    name = self._function_name_range(start, sig[position - 1] + 1)
+                    if name is not None:
+                        return index, close, name[0], name[1]
+                position = self._skip_group(position, high)
+                continue
+            if text == "[" or (angles and text == "{"):
+                position = self._skip_group(position, high)
+                continue
+            if text == "<":
+                angles += 1
+            elif text == ">" or text == ">>":
+                angles = max(0, angles - len(text))
+            elif not angles and text in _DECLARATOR_STOPS:
                 return None
-            index = sig[position]
-            close = pairs.get(index)
-            if close is not None and close < end and position != low:
-                name_start, name_end = self._function_name_range(start, sig[position - 1] + 1)
-                if name_start is not None:
-                    name_text = self._text(name_start, name_end).strip()
-                    if name_text not in _CONTROL and name_text not in _NOT_FUNCTION_NAMES:
-                        return index, close, name_start, name_end
             position += 1
+        return None
 
-    def _function_name_range(self, start: int, end: int) -> tuple[int | None, int]:
-        """识别普通函数名、析构名和 operator 名称的源码范围。
-        Locate the source range of a normal function, destructor, or operator name.
+    def _operator_parameter_list(
+        self, position: int, high: int, end: int
+    ) -> tuple[int, int, int, int] | None:
+        """operator 函数的参数列表和名字：名字从 operator 到参数列表的 ( 之前。
+        The parameter list and the name of an operator function: the name runs from operator to
+        the ( of the parameter list.
+
+        operator() 的第一对括号属于名字；operator bool、operator const char* 这样的转换函数
+        名字含类型。
+        The first pair of parentheses of operator() belongs to the name; conversion functions
+        such as operator bool and operator const char* have a type in the name.
+        """
+        stext = self._stext
+        sig = self._sig
+        following = position + 1
+        if following + 1 < high and stext[following] == "(" and stext[following + 1] == ")":
+            following += 2
+        while following < high and stext[following] != "(":
+            following += 1
+        if following >= high or following == position + 1:
+            return None
+        index = sig[following]
+        close = self._pairs.get(index)
+        if close is None or close >= end:
+            return None
+        return index, close, sig[position], sig[following - 1] + 1
+
+    def _function_name_range(self, start: int, end: int) -> tuple[int, int] | None:
+        """紧挨 end 之前的函数名或析构函数名的源码范围；不像函数名时返回 None。
+        The source range of the function or destructor name right before end; None when it does
+        not look like a function name.
         """
         last = self._previous_significant(end - 1, start)
-        if last is None:
-            return None, end
+        if last is not None and self._texts[last] == ")":
+            # 括号里的函数名 bool (isinf)(T x) 避开同名函数式宏；名字范围包括括号。
+            # A parenthesized function name bool (isinf)(T x) avoids a function-like macro of
+            # the same name; the name range includes the parentheses.
+            opening = self._reverse_pairs.get(last)
+            inner = None if opening is None else self._next_significant(opening + 1, last)
+            if (
+                opening is None
+                or inner is None
+                or self._next_significant(inner + 1, last) is not None
+                or self._infos[inner][0] != "identifier"
+                or self._texts[inner] in _TYPE_WORDS
+            ):
+                return None
+            return opening, last + 1
+        if last is None or self._infos[last][0] != "identifier":
+            return None
+        text = self._texts[last]
+        if text in _TYPE_WORDS or text in _CONTROL or text in _NOT_FUNCTION_NAMES:
+            return None
         before = self._previous_significant(last - 1, start)
-        before_text = None if before is None else self._texts[before]
-        if self._infos[last][0] == "identifier":
-            if before_text in ("~", "operator"):
-                return before, last + 1
-            return last, last + 1
-        if before_text == "operator":
+        if before is not None and self._texts[before] == "~":
             return before, last + 1
-        return None, end
+        return last, last + 1
 
     def _name_element(self, start: int, end: int) -> GreenElement:
-        """为函数名范围选择 identifier/destructor_name/operator_name。
-        Choose the syntax element kind for a function, destructor, or operator name.
+        """函数名范围的语法元素：普通名字、析构函数名、运算符函数名或带括号的名字。
+        The syntax element of a function name range: an identifier, destructor_name,
+        operator_name or parenthesized_declarator.
         """
+        if self._texts[start] == "(":
+            inner = self._next_significant(start + 1, end)
+            assert inner is not None
+            name = _token("identifier", self._texts[inner], True)
+            return self._compose(
+                "parenthesized_declarator", start, end, [(inner, inner + 1, name, "declarator")]
+            )
         stripped = self._text(start, end).strip()
         if stripped.startswith("operator") or stripped.startswith("~"):
             kind = "operator_name" if stripped.startswith("operator") else "destructor_name"
@@ -122,26 +232,51 @@ class _DeclaratorMixin(_ParserSupport):
         stext = self._stext
         sig = self._sig
         infos = self._infos
-        for start, end in self._split_top_level(open_paren + 1, close_paren, ","):
-            # 默认实参属于 parameter initializer，不参与“声明还是实参”的判定。
+        for start, end in self._split_top_level(
+            open_paren + 1, close_paren, ",", angle_brackets=True
+        ):
+            # 默认实参属于 parameter initializer，不参与“声明还是实参”的判定；模板实参和数组
+            # 边界里的字面量属于类型（std::array<int, 2> a、int (&a)[3]）。
             # Default arguments belong to the parameter initializer and do not make a
-            # function prototype look like a call.
+            # function prototype look like a call; literals in template arguments and array
+            # bounds belong to the type (std::array<int, 2> a, int (&a)[3]).
             equal = self._find_top_level_token(start, end, "=")
             low, high = self._span(start, equal if equal is not None else end)
-            for position in range(low, high):
-                if (
-                    infos[sig[position]][0] in _LITERAL_KINDS
-                    or stext[position] in _ARGUMENT_OPERATORS
+            # 参数以类型开头；(*cb_) 这样的括号是声明子，不是参数列表。
+            # A parameter starts with its type; parentheses such as (*cb_) are a declarator,
+            # not a parameter list.
+            if low < high and stext[low] in _POINTER_OPERATORS:
+                return False
+            angles = 0
+            position = low
+            while position < high:
+                text = stext[position]
+                if text == "[" or (angles and text in ("(", "{")):
+                    position = self._skip_group(position, high)
+                    continue
+                if text == "<":
+                    angles += 1
+                elif text == ">" or text == ">>":
+                    angles = max(0, angles - len(text))
+                elif not angles and (
+                    infos[sig[position]][0] in _LITERAL_KINDS or text in _ARGUMENT_OPERATORS
                 ):
                     return False
+                position += 1
             # `f(Type)` 合法，`object(arg)` 也可能；按 C++ most-vexing-parse 倾向函数。
             # Both forms are possible; follow the C++ most-vexing-parse bias toward a function
             # declaration.
         return True
 
-    def _find_parameter_name(self, start: int, end: int) -> int | None:
+    def _find_parameter_name(self, start: int, end: int, *, template: bool) -> int | None:
         """从参数 declarator 中定位名字，不把函数指针后面的参数类型误认成名字。
-        Locate a parameter declarator name without mistaking function-pointer parameter types for the name.
+        Locate a parameter declarator name without mistaking function-pointer parameter types for
+        the name.
+
+        名字是类型之后的标识符：int x 和 Foo x 的名字是 x，Foo& 和 const uint8_t* 没有名字。
+        模板参数中 typename 和 class 之后就是名字。
+        The name is an identifier after the type: the name of int x and Foo x is x, Foo& and
+        const uint8_t* have no name. In a template parameter the name follows typename or class.
         """
         low, high = self._span(start, end)
         if low >= high:
@@ -157,42 +292,39 @@ class _DeclaratorMixin(_ParserSupport):
             if (
                 infos[index][0] == "identifier"
                 and stext[position] not in _TYPE_WORDS
-                and stext[position - 1] in ("*", "&", "&&")
+                and stext[position - 1] in _POINTER_OPERATORS
                 and self._enclosing_open(sig[position - 1], "(", start) is not None
             ):
                 return index
 
-        candidates: list[int] = []
-        angle_depth = 0
-        for position in range(low, high):
+        name: int | None = None
+        typed = False
+        angles = 0
+        position = low
+        while position < high:
             text = stext[position]
+            if text in _OPENING:
+                position = self._skip_group(position, high)
+                continue
             if text == "<":
-                angle_depth += 1
-                continue
-            if angle_depth:
-                if text == ">":
-                    angle_depth -= 1
-                elif text == ">>":
-                    angle_depth = max(0, angle_depth - 2)
-                continue
-            index = sig[position]
-            if (
-                infos[index][0] == "identifier"
+                angles += 1
+            elif text == ">" or text == ">>":
+                angles = max(0, angles - len(text))
+            elif angles or infos[sig[position]][0] != "identifier" or text in _QUALIFIERS:
+                pass
+            elif text in _ELABORATED:
+                typed = typed or (template and text in ("typename", "class"))
+            elif (
+                typed
                 and text not in _TYPE_WORDS
                 and (position == low or stext[position - 1] != "::")
                 and (position + 1 == high or stext[position + 1] != "::")
             ):
-                candidates.append(index)
-        if not candidates:
-            return None
-        if len(candidates) == 1:
-            if stext[low] in ("typename", "class"):
-                return candidates[0]
-            # 单个自定义类型且没有 declarator 时通常是匿名参数。
-            # A lone custom type without a declarator is usually an unnamed parameter.
-            if candidates[0] == sig[low] and high - low == 1:
-                return None
-        return candidates[-1]
+                name = sig[position]
+            else:
+                typed = True
+            position += 1
+        return name
 
     def _find_variable_name(self, start: int, end: int) -> int | None:
         """识别常见变量 declarator 的名字，并忽略 initializer 内部的标识符。
@@ -210,10 +342,57 @@ class _DeclaratorMixin(_ParserSupport):
         self._variable_names[key] = result
         return result
 
+    def _parenthesized_declarator_name(self, start: int, end: int) -> int | None:
+        """void (*fp)(int) 和 int (&a)[3] 这类括号声明子里的名字；没有时返回 None。
+        The name inside a parenthesized declarator such as void (*fp)(int) or int (&a)[3]; None
+        without one.
+
+        括号前有类型，括号后是参数列表或数组边界，括号里名字紧跟 *、& 或 &&；只看顶层的 =、{
+        和 ; 之前。
+        A type comes before the parentheses, a parameter list or an array bound after them, and
+        inside them the name follows *, & or &&; only the part before a top-level =, { or ; is
+        searched.
+        """
+        stext = self._stext
+        sig = self._sig
+        infos = self._infos
+        rank = self._rank
+        low, high = self._span(start, end)
+        position = low + 1
+        while position < high:
+            text = stext[position]
+            if text in _DECLARATOR_STOPS:
+                return None
+            if text == "(":
+                close = self._pairs.get(sig[position])
+                if close is not None and close < end:
+                    after = rank[close] + 1
+                    if after < high and stext[after] in ("(", "["):
+                        inner = position + 1
+                        while inner < after - 1:
+                            if stext[inner] in _OPENING:
+                                inner = self._skip_group(inner, after - 1)
+                                continue
+                            if (
+                                stext[inner - 1] in _POINTER_OPERATORS
+                                and infos[sig[inner]][0] == "identifier"
+                                and stext[inner] not in _TYPE_WORDS
+                            ):
+                                return sig[inner]
+                            inner += 1
+            if text in _OPENING:
+                position = self._skip_group(position, high)
+                continue
+            position += 1
+        return None
+
     def _variable_name(self, start: int, end: int) -> int | None:
         """_find_variable_name 的实际计算。
         The actual computation behind _find_variable_name.
         """
+        nested = self._parenthesized_declarator_name(start, end)
+        if nested is not None:
+            return nested
         stext = self._stext
         sig = self._sig
         infos = self._infos
@@ -222,34 +401,97 @@ class _DeclaratorMixin(_ParserSupport):
         if equal is not None:
             search_end = equal
         else:
-            # direct-init/list-init 的第一个顶层括号属于 initializer，名字一定在它之前。
+            # direct-init/list-init 的第一个顶层括号属于 initializer，名字一定在它之前；
+            # 类型关键字之后的 { 是类型体（typedef struct {...} Name;），名字在它之后。
             # The first top-level direct/list-init delimiter starts the initializer, so the
-            # declarator name must appear before it.
+            # declarator name must appear before it; a { after a type keyword is a type body
+            # (typedef struct {...} Name;) and the name comes after it.
             pairs = self._pairs
             low, high = self._span(start, end)
-            for position in range(low, high):
-                if stext[position] in ("(", "{") and pairs.get(sig[position], end) < end:
+            type_body = False
+            position = low
+            while position < high:
+                text = stext[position]
+                if text in _TYPE_KEYWORDS:
+                    type_body = True
+                elif text in ("(", "{") and pairs.get(sig[position], end) < end:
+                    if text == "(" and position > low and stext[position - 1] in _ATTRIBUTE_WORDS:
+                        position = self._skip_group(position, high)
+                        continue
+                    if text == "{" and type_body:
+                        type_body = False
+                        position = self._skip_group(position, high)
+                        continue
                     search_end = sig[position]
                     break
+                position += 1
         low, high = self._span(start, search_end)
         candidates: list[int] = []
-        for position in range(low, high):
-            index = sig[position]
-            if infos[index][0] != "identifier":
+        position = low
+        while position < high:
+            text = stext[position]
+            if text in _OPENING:
+                position = self._skip_group(position, high)
                 continue
-            if stext[position] in _TYPE_STORAGE_QUALIFIER:
-                continue
-            if position > low and stext[position - 1] == "::":
-                continue
-            if position + 1 < high and stext[position + 1] == "::":
-                continue
-            candidates.append(position)
-        if len(candidates) < 2 and high > low and stext[low] not in _TYPE_STORAGE_QUALIFIER:
+            # 限定名的最后一段在声明子位置上时是名字（Foo::count_ = 0），否则属于类型
+            # （std::string s）。
+            # The last part of a qualified name is the name in declarator position
+            # (Foo::count_ = 0), and part of the type otherwise (std::string s).
+            at_end = position + 1 >= high or stext[position + 1] in _AFTER_VARIABLE_NAME
+            if (
+                infos[sig[position]][0] == "identifier"
+                and text not in _TYPE_STORAGE_QUALIFIER
+                and text not in _ATTRIBUTE_WORDS
+                and not (position > low and stext[position - 1] == "::" and not at_end)
+                and not (position + 1 < high and stext[position + 1] == "::")
+            ):
+                candidates.append(position)
+            position += 1
+        # 开头的属性（[[nodiscard]]、alignas(4)）之后的第一个记号决定单个候选能否是名字。
+        # The first token after leading attributes ([[nodiscard]], alignas(4)) decides whether a
+        # single candidate can be the name.
+        lead = low
+        while lead < high:
+            if stext[lead] == "[":
+                lead = self._skip_group(lead, high)
+            elif stext[lead] in _ATTRIBUTE_WORDS and lead + 1 < high and stext[lead + 1] == "(":
+                lead = self._skip_group(lead + 1, high)
+            else:
+                break
+        if not candidates or (
+            len(candidates) == 1
+            and stext[lead] not in _TYPE_STORAGE_QUALIFIER
+            and not self._follows_type(candidates[0], lead)
+        ):
             return None
         for position in reversed(candidates):
             if position + 1 >= high or stext[position + 1] in _AFTER_VARIABLE_NAME:
                 return sig[position]
         return sig[candidates[-1]] if len(candidates) >= 2 else None
+
+    def _follows_type(self, position: int, low: int) -> bool:
+        """名字前面像类型：跳过名字的限定、*、&、&& 和 cv 限定后是标识符或 >（std::string s）。
+        Whether a type seems to come before the name at position: after skipping the name's
+        qualification, *, &, && and cv-qualifiers, an identifier or > (std::string s,
+        std::vector<int> v).
+        """
+        stext = self._stext
+        infos = self._infos
+        sig = self._sig
+        before = position - 1
+        while (
+            before - 1 >= low
+            and stext[before] == "::"
+            and infos[sig[before - 1]][0] == "identifier"
+        ):
+            before -= 2
+        while before >= low and (
+            stext[before] in _POINTER_OPERATORS or stext[before] in _QUALIFIERS
+        ):
+            before -= 1
+        return before >= low and (
+            stext[before] in (">", ">>") or infos[sig[before]][0] == "identifier"
+        )
 
     def _looks_like_declaration(self, start: int, end: int, *, context: str) -> bool:
         """用保守启发式判断一个分号单元是否像声明。

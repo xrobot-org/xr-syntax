@@ -58,3 +58,50 @@ def test_matching_delimiter_reports_invalid_or_unclosed_input() -> None:
         matching_delimiter(tokens, 0)
     with pytest.raises(ValueError, match="^unclosed delimiter at offset 1$"):
         matching_delimiter(tokens, 1)
+
+
+def test_an_unclosed_quote_ends_with_its_line() -> None:
+    # #error 和 #if 0 中的文字不是代码，撇号常常不成对。
+    # The text of #error and #if 0 is not code, and its apostrophes are often unpaired.
+    source = "#error Don't build this\n#if 0\nthis isn't compiled\n#endif\nint y;\n"
+    assert [(item.text, item.kind) for item in code_tokens(source)] == [
+        ("this", "identifier"),
+        ("isn", "identifier"),
+        ("'t compiled", "literal"),
+        ("int", "identifier"),
+        ("y", "identifier"),
+        (";", "punct"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("source", "texts"),
+    [
+        ("std::vector<::Foo> v;", ["std", "::", "vector", "<", "::", "Foo", ">", "v", ";"]),
+        ("int a<:3:>;", ["int", "a", "<:", "3", ":>", ";"]),
+        ("a<:::b", ["a", "<:", "::", "b"]),
+        ("a<::>b", ["a", "<:", ":>", "b"]),
+    ],
+)
+def test_the_digraph_rule_for_less_colon_colon(source: str, texts: list[str]) -> None:
+    assert [item.text for item in code_tokens(source)] == texts
+
+
+def test_raw_strings_hold_quotes_and_comment_markers() -> None:
+    source = 'auto a = R"x(say "hi" // not a comment)x"; auto b = R"(/* " */)"; int c;'
+    texts = [item.text for item in code_tokens(source)]
+    assert texts == [
+        "auto",
+        "a",
+        "=",
+        'R"x(say "hi" // not a comment)x"',
+        ";",
+        "auto",
+        "b",
+        "=",
+        'R"(/* " */)"',
+        ";",
+        "int",
+        "c",
+        ";",
+    ]

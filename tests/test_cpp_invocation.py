@@ -23,6 +23,13 @@ def test_invocations_keep_template_commas_and_skip_comments_and_directives() -> 
     ]
 
 
+def test_angles_inside_parentheses_do_not_nest_a_source_list() -> None:
+    assert split_source_list("A<(1 > 2), int>, x", template_angles=True) == (
+        "A<(1 > 2), int>",
+        "x",
+    )
+
+
 def test_a_source_list_with_an_unclosed_template_is_refused() -> None:
     with pytest.raises(ValueError, match="^unbalanced C\\+\\+ source list$"):
         split_source_list("a, std::array<int, 2", template_angles=True)

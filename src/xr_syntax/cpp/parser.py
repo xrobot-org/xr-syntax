@@ -17,8 +17,8 @@ from xr_syntax.core import (
 from xr_syntax.core.green import _token
 from xr_syntax.i18n import tr
 
-from ._declaration import _DeclarationMixin
-from ._declarator import _DeclaratorMixin
+from ._declaration import _BEFORE_INITIALIZERS, _DeclarationMixin
+from ._declarator import _ATTRIBUTE_WORDS, _TYPE_KEYWORDS, _DeclaratorMixin
 from ._expression import _ExpressionMixin
 from ._ranges import _deduplicate_replacements, _RangeMixin
 from ._support import _Replacement
@@ -39,8 +39,9 @@ _PREPROCESSOR_KINDS = {
     "ifndef": "preproc_ifdef",
 }
 _CONTROL_OR_DO = frozenset(_CONTROL | {"do"})
-_UNIT_DELIMITERS = frozenset({"(", ")", "[", "]", ";", "{"})
-_CLASS_ATTRIBUTE_WORDS = frozenset({"alignas", "__attribute__", "__declspec"})
+# _find_unit_end 关心的记号；其他记号直接跳过。
+# The tokens _find_unit_end looks at; other tokens are skipped.
+_UNIT_TOKENS = frozenset({"(", ")", "[", "]", ";", "{", ":"} | _TYPE_KEYWORDS)
 _OPENING_DELIMITERS = {"(": ")", "[": "]", "{": "}"}
 _CLOSING_DELIMITERS = {")": "(", "]": "[", "}": "{"}
 
@@ -113,6 +114,7 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
         self._texts = texts
         self._infos = lexed.infos
         self._offsets = lexed.offsets
+        self._lexed = lexed
         self._count = len(texts)
         self.diagnostics = list(lexed.diagnostics)
         significant = lexed.significance()
@@ -242,8 +244,15 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
                         cursor = semicolon + 1
                     continue
 
-            if text == "namespace":
+            if text == "namespace" or text == "inline":
                 replacement = self._parse_namespace(current, end)
+                if replacement is not None:
+                    result.append(replacement)
+                    cursor = replacement[1]
+                    continue
+
+            if text == "extern":
+                replacement = self._parse_linkage(current, end)
                 if replacement is not None:
                     result.append(replacement)
                     cursor = replacement[1]
@@ -279,20 +288,60 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
         first_text = texts[first]
         if first_text in _CONTROL_OR_DO:
             return self._control_unit_end(first, end)
+        if first_text == "case" or first_text == "default":
+            # case 和 default 标签单独成为一个单元，标签后的语句另起一个单元。
+            # A case or default label is a unit by itself; the statement after it is another.
+            colon = self._find_top_level_token(first + 1, end, ":")
+            if colon is not None:
+                return colon + 1
 
         stext = self._stext
         sig = self._sig
         pairs = self._pairs
+        infos = self._infos
         depth_round = depth_square = 0
+        initializers = type_body = False
         low, high = self._span(first, end)
         position = low
         while position < high:
             text = stext[position]
-            if text not in _UNIT_DELIMITERS:
+            if text not in _UNIT_TOKENS:
                 position += 1
+                continue
+            if text in _TYPE_KEYWORDS:
+                # typedef struct {...} Name; 中，类型关键字之后、参数列表之前的 { 是类型体。
+                # In typedef struct {...} Name;, a { after a type keyword and before any
+                # parameter list is a type body.
+                if not (depth_round or depth_square):
+                    type_body = True
+                position += 1
+                continue
+            if text == ":":
+                # 参数列表之后的 : 开始构造函数的成员初始化列表。
+                # A : after the parameter list starts a constructor's member initializer list.
+                if (
+                    not (depth_round or depth_square)
+                    and position > low
+                    and stext[position - 1] in _BEFORE_INITIALIZERS
+                ):
+                    initializers = True
+                position += 1
+                continue
+            if (
+                initializers
+                and text == "{"
+                and not (depth_round or depth_square)
+                and (stext[position - 1] == ">" or infos[sig[position - 1]][0] == "identifier")
+            ):
+                # 成员初始化列表里紧跟名字的 { 是一项初始化，函数体在其后。
+                # In a member initializer list, a { right after a name is one initializer; the
+                # function body comes after it.
+                position = self._skip_group(position, high)
                 continue
             if text == "(" or text == "[":
                 if not (depth_round or depth_square):
+                    if text == "(" and stext[position - 1] not in _ATTRIBUTE_WORDS:
+                        type_body = False
                     skipped = self._skip_group(position, high)
                     if skipped != position + 1:
                         position = skipped
@@ -311,13 +360,17 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
                     return index + 1
                 if index in pairs:
                     close = pairs[index]
-                    if first_text in ("class", "struct", "union", "enum"):
+                    if first_text in _TYPE_KEYWORDS:
                         semicolon = self._next_significant(close + 1, end)
                         return (
                             semicolon + 1
                             if semicolon is not None and texts[semicolon] == ";"
                             else close + 1
                         )
+                    if type_body and stext[position - 1] != "=":
+                        type_body = False
+                        position = self._skip_group(position, high)
+                        continue
                     # direct-list initialization 要继续找到 ;，函数/namespace 则在 } 结束。
                     # Direct-list initialization continues through the semicolon, while function
                     # and namespace bodies end at the closing brace.
@@ -335,30 +388,57 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
 
     def _control_unit_end(self, start: int, end: int) -> int:
         """寻找控制流语句末尾，避免把 body 内分号误当外层结束。
-        Find the end of a control-flow statement without treating body semicolons as the outer terminator.
+        Find the end of a control-flow statement without treating body semicolons as the outer
+        terminator.
+
+        不带花括号的嵌套控制语句和 else if 链用栈迭代处理，链再长也不会递归；栈里记录每层是否是
+        if，结束时从最内层起为 if 配上后面的 else，悬空的 else 因此归最近的 if。
+        Unbraced nested control statements and else-if chains are handled iteratively with a
+        stack, so no chain length recurses; the stack records whether each level is an if, and on
+        the way out each if from the innermost on takes a following else, so a dangling else
+        belongs to the nearest if.
         """
         texts = self._texts
         pairs = self._pairs
-        cursor = start + 1
-        open_paren = self._next_significant(cursor, end)
-        if open_paren is not None and texts[open_paren] == "(" and open_paren in pairs:
-            cursor = pairs[open_paren] + 1
-        body = self._next_significant(cursor, end)
-        if body is None:
-            return end
-        if texts[body] == "{" and body in pairs:
-            result = pairs[body] + 1
-        else:
-            result = self._find_unit_end(body, end, context="block")
-        if texts[start] == "if":
-            else_index = self._next_significant(result, end)
-            if else_index is not None and texts[else_index] == "else":
+        pending: list[bool] = []
+        cursor = start
+        while True:
+            after = cursor + 1
+            open_paren = self._next_significant(after, end)
+            if open_paren is not None and texts[open_paren] == "(" and open_paren in pairs:
+                after = pairs[open_paren] + 1
+            body = self._next_significant(after, end)
+            if body is None:
+                return end
+            pending.append(texts[cursor] == "if")
+            if texts[body] in _CONTROL_OR_DO:
+                cursor = body
+                continue
+            result = self._body_end(body, end)
+            while pending:
+                if not pending.pop():
+                    continue
+                else_index = self._next_significant(result, end)
+                if else_index is None or texts[else_index] != "else":
+                    continue
                 else_body = self._next_significant(else_index + 1, end)
-                if else_body is not None and texts[else_body] == "{" and else_body in pairs:
-                    result = pairs[else_body] + 1
-                elif else_body is not None:
-                    result = self._find_unit_end(else_body, end, context="block")
-        return result
+                if else_body is None:
+                    continue
+                if texts[else_body] in _CONTROL_OR_DO:
+                    cursor = else_body
+                    break
+                result = self._body_end(else_body, end)
+            else:
+                return result
+
+    def _body_end(self, body: int, end: int) -> int:
+        """不是控制语句的 body 结束的位置：花括号块到右括号之后，其他语句到其末尾。
+        Where a body that is no control statement ends: a braced block after its closing brace,
+        another statement at its end.
+        """
+        if self._texts[body] == "{" and body in self._pairs:
+            return self._pairs[body] + 1
+        return self._find_unit_end(body, end, context="block")
 
     def _parse_preprocessor(self, start: int, end: int) -> _Replacement:
         """解析一条逻辑预处理行，并对 #include 暴露 path field。
@@ -448,13 +528,12 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
         Split a template parameter list into parameter nodes carrying name/default fields.
         """
         replacements: list[_Replacement] = []
-        for part_start, part_end in self._split_top_level(
-            open_angle + 1, close_angle, ",", angle_brackets=True
-        ):
-            if self._next_significant(part_start, part_end) is None:
+        for part in self._split_top_level(open_angle + 1, close_angle, ",", angle_brackets=True):
+            trimmed = self._trim(*part)
+            if trimmed is None:
                 continue
-            node = self._parse_parameter(part_start, part_end, template=True)
-            replacements.append((part_start, part_end, node, None))
+            node = self._parse_parameter(*trimmed, template=True)
+            replacements.append((*trimmed, node, None))
         return self._compose("template_parameter_list", open_angle, close_angle + 1, replacements)
 
     def _parse_class(self, start: int, end: int) -> _Replacement | None:
@@ -590,7 +669,7 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
                 if following != "[":
                     return position
                 skip_to = pairs[index]
-            elif text in _CLASS_ATTRIBUTE_WORDS and self._infos[index][0] == "identifier":
+            elif text in _ATTRIBUTE_WORDS and self._infos[index][0] == "identifier":
                 if following == "(":
                     skip_to = pairs.get(sig[position + 1])
             if skip_to is None:
@@ -600,27 +679,82 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
         return position
 
     def _parse_namespace(self, start: int, end: int) -> _Replacement | None:
-        """解析 namespace body，使内部声明仍可结构化查询。
-        Parse a namespace body so declarations inside remain structurally queryable.
+        """解析命名空间定义（可带 inline），使内部声明仍可结构化查询；不是定义时返回 None。
+        Parse a namespace definition (inline allowed) so declarations inside remain structurally
+        queryable; None when the source is no definition.
+
+        名字可以是嵌套名 a::b 和 a::inline b，此时 name 是 nested_namespace_specifier。
+        命名空间别名 namespace fs = std::filesystem; 不是定义。
+        The name may be a nested name a::b or a::inline b; name is then a
+        nested_namespace_specifier. A namespace alias namespace fs = std::filesystem; is no
+        definition.
         """
+        sig = self._sig
+        stext = self._stext
+        infos = self._infos
         low, high = self._span(start + 1, end)
-        try:
-            open_position = self._stext.index("{", low, high)
-        except ValueError:
+        if self._texts[start] == "inline":
+            if low >= high or stext[low] != "namespace":
+                return None
+            low += 1
+        position = self._skip_class_attributes(low, high, low)
+        name: tuple[int, int] | None = None
+        if position < high and infos[sig[position]][0] == "identifier":
+            last = position
+            while last + 2 < high and stext[last + 1] == "::":
+                following = last + 2
+                if stext[following] == "inline" and following + 1 < high:
+                    following += 1
+                if infos[sig[following]][0] != "identifier":
+                    break
+                last = following
+            name = (sig[position], sig[last])
+            position = self._skip_class_attributes(low, high, last + 1)
+        if position >= high or stext[position] != "{":
             return None
-        open_brace = self._sig[open_position]
-        if open_brace not in self._pairs:
+        open_brace = sig[position]
+        close_brace = self._pairs.get(open_brace)
+        if close_brace is None:
             return None
-        close_brace = self._pairs[open_brace]
         replacements = self._parse_scope(open_brace + 1, close_brace, context="top")
         body = self._compose("declaration_list", open_brace, close_brace + 1, replacements)
         nested: list[_Replacement] = [(open_brace, close_brace + 1, body, "body")]
-        for position in range(low, open_position):
-            name = self._sig[position]
-            if self._infos[name][0] == "identifier":
-                nested.append((name, name + 1, self._plain[name].element, "name"))
-                break
+        if name is not None:
+            first, last = name
+            element: GreenElement = (
+                self._plain[first].element
+                if first == last
+                else self._compose("nested_namespace_specifier", first, last + 1, [])
+            )
+            nested.append((first, last + 1, element, "name"))
         node = self._compose("namespace_definition", start, close_brace + 1, nested)
+        return (start, close_brace + 1, node, None)
+
+    def _parse_linkage(self, start: int, end: int) -> _Replacement | None:
+        """解析 extern "C" { ... } 这样的链接说明块，块内按顶层作用域解析；其他 extern 返回 None。
+        Parse a linkage specification block such as extern "C" { ... }, whose inside is parsed
+        as a top-level scope; None for any other extern.
+        """
+        literal = self._next_significant(start + 1, end)
+        if literal is None or self._infos[literal][0] != "string_literal":
+            return None
+        open_brace = self._next_significant(literal + 1, end)
+        if open_brace is None or self._texts[open_brace] != "{":
+            return None
+        close_brace = self._pairs.get(open_brace)
+        if close_brace is None or close_brace >= end:
+            return None
+        replacements = self._parse_scope(open_brace + 1, close_brace, context="top")
+        body = self._compose("declaration_list", open_brace, close_brace + 1, replacements)
+        node = self._compose(
+            "linkage_specification",
+            start,
+            close_brace + 1,
+            [
+                (literal, literal + 1, self._plain[literal].element, "value"),
+                (open_brace, close_brace + 1, body, "body"),
+            ],
+        )
         return (start, close_brace + 1, node, None)
 
 

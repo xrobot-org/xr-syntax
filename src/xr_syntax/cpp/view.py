@@ -163,8 +163,8 @@ class CppFunctionView:
 
     @property
     def parameters(self) -> tuple[CppParameterView, ...]:
-        """按声明顺序返回类型化参数视图。
-        Return typed views of declared parameters.
+        """按声明顺序返回类型化参数视图；(void) 表示没有参数。
+        Return typed views of declared parameters; (void) means no parameters.
         """
         declarator = self.declarator
         if declarator is None:
@@ -172,11 +172,14 @@ class CppFunctionView:
         parameters = declarator.child_by_field("parameters")
         if not isinstance(parameters, SyntaxNode):
             return ()
-        return tuple(
+        result = tuple(
             CppParameterView(child)
             for child in parameters.named_children
             if child.kind in {"parameter_declaration", "optional_parameter_declaration"}
         )
+        if len(result) == 1 and result[0].text == "void":
+            return ()
+        return result
 
     @property
     def body(self) -> SyntaxElement | None:
@@ -245,7 +248,10 @@ class CppClassView:
         result: list[CppFunctionView] = []
         for child in body.named_children:
             if child.kind == "access_specifier":
-                access = child.text.strip().rstrip(":")
+                # 第一个记号是 public、protected 或 private；它和 : 之间可以有空白和注释。
+                # The first token is public, protected or private; whitespace and comments may
+                # come between it and the :.
+                access = child.syntax_children[0].text
                 continue
             if find_function_declarator(child) is not None:
                 result.append(CppFunctionView(child, access))

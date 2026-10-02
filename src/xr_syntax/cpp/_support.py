@@ -5,6 +5,7 @@ Strict internal typing contract shared by the native C++ parser mixins.
 from __future__ import annotations
 
 from xr_syntax.core import Diagnostic, GreenChild, GreenElement, GreenNode
+from xr_syntax.cpp.lexer import _Lexed
 
 # (start, end, element, field)：用 element 替换 lexeme 区间 [start, end)，边上带 field。
 # (start, end, element, field): element replaces the lexeme range [start, end), with field on the
@@ -23,6 +24,8 @@ class _ParserSupport:
             The (kind, named, trivia) of each lexeme.
         _offsets: 每个 lexeme 起点的字节位置，最后一项是源码总字节数。
             The byte position where each lexeme starts; the last item is the source size.
+        _lexed: 词法扫描结果，用来给诊断算出行列位置。
+            The lexing result, used to give diagnostics their rows and columns.
         _count: lexeme 个数。
             The number of lexemes.
         _sig: 有效 lexeme（非空白、非注释）的下标，按顺序排列。
@@ -47,6 +50,7 @@ class _ParserSupport:
     _texts: list[str]
     _infos: list[tuple[str, bool, bool]]
     _offsets: list[int]
+    _lexed: _Lexed
     _count: int
     _sig: list[int]
     _stext: list[str]
@@ -280,7 +284,7 @@ class _ParserSupport:
         """
         raise NotImplementedError
 
-    def _find_parameter_name(self, start: int, end: int) -> int | None:
+    def _find_parameter_name(self, start: int, end: int, *, template: bool) -> int | None:
         """定位参数 declarator 名称。
         Locate a parameter declarator name without mistaking function-pointer parameter types for the name.
         """

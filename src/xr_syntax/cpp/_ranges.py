@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any, TypeVar
 
-from xr_syntax.core import Diagnostic, GreenChild, GreenElement, GreenNode, SourcePoint, SourceSpan
+from xr_syntax.core import GreenChild, GreenElement, GreenNode, SourceSpan
 from xr_syntax.core.green import _child, _node
 from xr_syntax.i18n import tr
 
@@ -23,6 +23,7 @@ _Ranged = TypeVar("_Ranged", bound=tuple[Any, ...])
 # _split_top_level / _find_top_level_token 关心的分隔符；其他 token 直接跳过。
 # The delimiters _split_top_level and _find_top_level_token track; other tokens are skipped.
 _BRACKETS = frozenset("()[]{}")
+_OPENING_BRACKETS = frozenset("([{")
 _ANGLE_BRACKETS = frozenset(("<", ">", ">>"))
 
 
@@ -90,14 +91,19 @@ class _RangeMixin(_ParserSupport):
         return None
 
     def _line_prefix_is_trivia(self, index: int, lower_bound: int) -> bool:
-        """判断 `#` 前直到行首是否只有空白。
-        Return whether only whitespace appears between the line start and the # token.
+        """判断 `#` 前直到行首是否只有空白和注释；注释在预处理前已换成空格，跨行的块注释也一样。
+        Return whether only whitespace and comments come between the line start and the # token;
+        comments become a space before preprocessing, block comments across lines too.
         """
         texts = self._texts
         infos = self._infos
         cursor = index - 1
         while cursor >= lower_bound:
-            if not infos[cursor][2]:
+            kind, _, trivia = infos[cursor]
+            if kind == "comment":
+                cursor -= 1
+                continue
+            if not trivia:
                 return False
             text = texts[cursor]
             if "\n" in text or "\r" in text:
@@ -173,14 +179,10 @@ class _RangeMixin(_ParserSupport):
         while position < high:
             text = stext[position]
             if text in _BRACKETS:
-                # 深度为 0 时整组跳过；计尖括号时不跳，因为括号里的 < 和 > 也改变尖括号深度。
-                # At depth 0 a group is skipped as a whole, except when angle brackets are counted,
-                # because < and > inside the group change the angle depth too.
-                if (
-                    not angle_brackets
-                    and text in "([{"
-                    and not (round_depth or square_depth or brace_depth)
-                ):
+                # 深度为 0 时整组跳过；尖括号只在括号外计数，(1 > 2) 里的 > 不关闭模板实参。
+                # At depth 0 a group is skipped as a whole; angle brackets count only outside
+                # brackets, so the > in (1 > 2) closes no template argument list.
+                if text in _OPENING_BRACKETS and not (round_depth or square_depth or brace_depth):
                     skipped = self._skip_group(position, high)
                     if skipped != position + 1:
                         position = skipped
@@ -197,7 +199,11 @@ class _RangeMixin(_ParserSupport):
                     brace_depth += 1
                 else:
                     brace_depth = max(0, brace_depth - 1)
-            elif angle_brackets and text in _ANGLE_BRACKETS:
+            elif (
+                angle_brackets
+                and text in _ANGLE_BRACKETS
+                and not (round_depth or square_depth or brace_depth)
+            ):
                 if text == "<":
                     angle_depth += 1
                 elif angle_depth:
@@ -247,14 +253,19 @@ class _RangeMixin(_ParserSupport):
         return None
 
     def _match_angle(self, opening: int, end: int) -> int | None:
-        """为 template 参数列表匹配角括号，并正确处理 `>>`。
-        Match template angle brackets, including a >> token that closes two nested levels.
+        """为 template 参数列表匹配角括号，并正确处理 `>>`；括号组内的 < 和 > 不计。
+        Match template angle brackets, including a >> token that closes two nested levels;
+        < and > inside a bracket group do not count.
         """
         stext = self._stext
         depth = 0
         low, high = self._span(opening, end)
-        for position in range(low, high):
+        position = low
+        while position < high:
             text = stext[position]
+            if text in _OPENING_BRACKETS:
+                position = self._skip_group(position, high)
+                continue
             if text == "<":
                 depth += 1
             elif text == ">":
@@ -263,6 +274,7 @@ class _RangeMixin(_ParserSupport):
                 depth -= 2
             if depth <= 0:
                 return self._sig[position]
+            position += 1
         self._diagnostic(
             tr("unclosed template argument list", "未闭合的模板参数列表"),
             opening,
@@ -343,7 +355,7 @@ class _RangeMixin(_ParserSupport):
             offsets = self._offsets
             end_index = min(max(start, end - 1), last)
             span = SourceSpan(offsets[min(start, last)], offsets[end_index + 1])
-        self.diagnostics.append(Diagnostic(message, span, SourcePoint(0, 0), None))
+        self.diagnostics.append(self._lexed.diagnostic(message, span))
 
 
 def _deduplicate_replacements(replacements: list[_Ranged]) -> list[_Ranged]:

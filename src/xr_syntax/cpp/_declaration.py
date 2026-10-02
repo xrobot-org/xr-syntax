@@ -4,15 +4,20 @@ Internal C++ parser stages for declaration units, functions, and parameters.
 
 from __future__ import annotations
 
-from xr_syntax.core import GreenNode
+from xr_syntax.core import GreenElement, GreenNode
 from xr_syntax.core.green import _token
 
+from ._declarator import _TYPE_KEYWORDS
 from ._support import _ParserSupport, _Replacement
 from .lexer import _CONTROL, _STORAGE, _TYPE_WORDS
 
 # 函数声明子 ) 之后仍属于 declarator 的修饰词。
 # Words after the ) of a function declarator that still belong to the declarator.
 _DECLARATOR_SUFFIXES = frozenset({"const", "volatile", "noexcept", "override", "final", "&", "&&"})
+# 构造函数成员初始化列表的 : 之前的记号：参数列表的 )、noexcept 和函数 try 块的 try。
+# The tokens before the : of a constructor's member initializer list: the ) of the parameter
+# list, noexcept, and the try of a function try block.
+_BEFORE_INITIALIZERS = frozenset({")", "noexcept", "try"})
 _UNIT_CONTEXTS = frozenset({"top", "class", "block"})
 
 
@@ -38,6 +43,24 @@ class _DeclarationMixin(_ParserSupport):
             return self._parse_do(start, end)
         if first == "break" or first == "continue":
             return (start, end, self._compose(first + "_statement", start, end, []), None)
+        if first == "{" and context == "block":
+            # 函数体里单独的 { ... } 是一个复合语句。
+            # A lone { ... } in a function body is a compound statement.
+            opening = self._sig[low]
+            close = self._pairs.get(opening)
+            if close == self._sig[high - 1]:
+                return (opening, close + 1, self._parse_compound(opening, close), None)
+        if (first == "case" or first == "default") and self._stext[high - 1] == ":":
+            # 标签之后的语句是同级的下一个节点。
+            # The statement after the label is the next sibling node.
+            replacements: list[_Replacement] = []
+            if first == "case":
+                value = self._expression_replacement(
+                    self._sig[low + 1], self._sig[high - 1], "value"
+                )
+                if value is not None:
+                    replacements.append(value)
+            return (start, end, self._compose("case_label", start, end, replacements), None)
         if first == "concept":
             return self._parse_concept(start, end)
 
@@ -82,22 +105,8 @@ class _DeclarationMixin(_ParserSupport):
         if candidate is None:
             return None
         open_paren, close_paren, name_start, name_end = candidate
-        stext = self._stext
-        sig = self._sig
         pairs = self._pairs
-        body_open = None
-        low, high = self._span(close_paren + 1, end)
-        position = low
-        while True:
-            try:
-                position = stext.index("{", position, high)
-            except ValueError:
-                break
-            if pairs.get(sig[position], end) < end:
-                body_open = sig[position]
-                break
-            position += 1
-
+        body_open = self._function_body(close_paren, end)
         if body_open is None and not self._prototype_is_function(
             start, end, open_paren, close_paren, name_start, context
         ):
@@ -152,6 +161,44 @@ class _DeclarationMixin(_ParserSupport):
             replacements.append(clause)
         return (start, end, self._compose("declaration", start, end, replacements), None)
 
+    def _function_body(self, close_paren: int, end: int) -> int | None:
+        """参数列表之后函数体的 {；遇到顶层的 = 或 ; 时没有函数体，返回 None。
+        The { of the function body after the parameter list; None when a top-level = or ; comes
+        first and there is no body.
+
+        成员初始化列表里紧跟名字的 { 是一项初始化（: y_{2}），不是函数体。
+        In a member initializer list, a { right after a name is one initializer (: y_{2}), not
+        the body.
+        """
+        stext = self._stext
+        sig = self._sig
+        infos = self._infos
+        initializers = False
+        low, high = self._span(close_paren + 1, end)
+        position = low
+        while position < high:
+            text = stext[position]
+            if text == "{":
+                index = sig[position]
+                if self._pairs.get(index, end) >= end:
+                    position += 1
+                    continue
+                if initializers and (
+                    stext[position - 1] == ">" or infos[sig[position - 1]][0] == "identifier"
+                ):
+                    position = self._skip_group(position, high)
+                    continue
+                return index
+            if text == "(" or text == "[":
+                position = self._skip_group(position, high)
+                continue
+            if text == ":" and stext[position - 1] in _BEFORE_INITIALIZERS:
+                initializers = True
+            elif text == "=" or text == ";":
+                return None
+            position += 1
+        return None
+
     def _parse_parameter_list(self, open_paren: int, close_paren: int) -> GreenNode:
         """解析函数参数列表并保留逗号与空白。
         Parse a function parameter list while preserving commas and whitespace.
@@ -160,13 +207,14 @@ class _DeclarationMixin(_ParserSupport):
         # 参数类型中的模板实参含有逗号（std::pair<int, float> p），尖括号按嵌套处理。
         # Template arguments in parameter types contain commas (std::pair<int, float> p), so
         # angle brackets nest.
-        for part_start, part_end in self._split_top_level(
-            open_paren + 1, close_paren, ",", angle_brackets=True
-        ):
-            if self._next_significant(part_start, part_end) is None:
+        for part in self._split_top_level(open_paren + 1, close_paren, ",", angle_brackets=True):
+            # 参数节点不含两端的空白和注释。
+            # A parameter node holds no whitespace or comments at either end.
+            trimmed = self._trim(*part)
+            if trimmed is None:
                 continue
-            parameter = self._parse_parameter(part_start, part_end, template=False)
-            replacements.append((part_start, part_end, parameter, None))
+            parameter = self._parse_parameter(*trimmed, template=False)
+            replacements.append((*trimmed, parameter, None))
         return self._compose("parameter_list", open_paren, close_paren + 1, replacements)
 
     def _parse_parameter(self, start: int, end: int, *, template: bool) -> GreenNode:
@@ -176,7 +224,9 @@ class _DeclarationMixin(_ParserSupport):
         low, high = self._span(start, end)
         stext = self._stext
         equal = self._find_top_level_token(start, end, "=")
-        name = self._find_parameter_name(start, equal if equal is not None else end)
+        name = self._find_parameter_name(
+            start, equal if equal is not None else end, template=template
+        )
         first = stext[low] if low < high else ""
         replacements: list[_Replacement] = []
         if name is not None:
@@ -213,6 +263,33 @@ class _DeclarationMixin(_ParserSupport):
             )
         return self._compose(kind, start, end, replacements)
 
+    def _parse_type_declaration(
+        self, start: int, end: int, content_end: int
+    ) -> _Replacement | None:
+        """只声明类型、没有声明子的声明，例如 enum { A = 1 };；其他情况返回 None。
+        A declaration of a type alone without a declarator, such as enum { A = 1 };; None
+        otherwise.
+        """
+        stext = self._stext
+        low, high = self._span(start, content_end)
+        position = low
+        while position < high and stext[position] in _STORAGE:
+            position += 1
+        if position >= high or stext[position] not in _TYPE_KEYWORDS or stext[high - 1] != "}":
+            return None
+        type_start = self._sig[position]
+        type_end = self._sig[high - 1] + 1
+        replacements: list[_Replacement] = [
+            (
+                type_start,
+                type_end,
+                self._compose("type_descriptor", type_start, type_end, []),
+                "type",
+            )
+        ]
+        replacements.extend(self._specifier_replacements(start, type_start))
+        return (start, end, self._compose("declaration", start, end, replacements), None)
+
     def _parse_declaration(self, start: int, end: int) -> _Replacement | None:
         """解析常见变量声明；无法稳定拆分时返回 None 让上层保留原文。
         Parse common variable declarations; return None when a stable split is not possible so the caller preserves the original source.
@@ -223,7 +300,7 @@ class _DeclarationMixin(_ParserSupport):
 
         name = self._find_variable_name(start, content_end)
         if name is None:
-            return None
+            return self._parse_type_declaration(start, end, content_end)
 
         texts = self._texts
         type_start = self._next_significant(start, name)
@@ -232,8 +309,25 @@ class _DeclarationMixin(_ParserSupport):
         if type_start is None:
             return None
 
-        type_end = name
-        before_name = self._previous_significant(name - 1, type_start)
+        # 限定名 Foo::count_ 整个是声明子的名字。
+        # A qualified name Foo::count_ as a whole is the declarator name.
+        name_start = name
+        separator = self._previous_significant(name - 1, type_start)
+        while separator is not None and texts[separator] == "::":
+            qualifier = self._previous_significant(separator - 1, type_start)
+            if qualifier is None or self._infos[qualifier][0] != "identifier":
+                break
+            name_start = qualifier
+            separator = self._previous_significant(qualifier - 1, type_start)
+
+        # 括号声明子 (*fp)(int) 整个属于 declarator，类型到左括号为止。
+        # A parenthesized declarator (*fp)(int) belongs to the declarator as a whole; the type
+        # ends at its opening parenthesis.
+        type_end = name_start
+        opening = self._enclosing_open(name, "(", type_start)
+        if opening is not None:
+            type_end = opening
+        before_name = self._previous_significant(type_end - 1, type_start)
         while before_name is not None and texts[before_name] in ("*", "&", "&&"):
             type_end = before_name
             before_name = self._previous_significant(before_name - 1, type_start)
@@ -253,8 +347,13 @@ class _DeclarationMixin(_ParserSupport):
             ):
                 value_start = next_after_name
 
+        name_element: GreenElement = (
+            self._plain[name].element
+            if name_start == name
+            else self._compose("qualified_identifier", name_start, name + 1, [])
+        )
         declarator_replacements: list[_Replacement] = [
-            (name, name + 1, self._plain[name].element, "declarator")
+            (name_start, name + 1, name_element, "declarator")
         ]
         if value_start is not None:
             replacement = self._expression_replacement(value_start, content_end, "value")

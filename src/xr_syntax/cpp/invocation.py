@@ -208,14 +208,12 @@ def _matching_paren(lexed: _Lexed, opening: int) -> int | None:
     Match the outer parenthesis of a lexical invocation.
     """
     texts = lexed.texts
-    infos = lexed.infos
     depth = 0
     for index in range(opening, len(texts)):
         text = texts[index]
         if text == "(":
-            if infos[index][0] != "comment":
-                depth += 1
-        elif text == ")" and infos[index][0] != "comment":
+            depth += 1
+        elif text == ")":
             depth -= 1
             if depth == 0:
                 return index
@@ -232,9 +230,10 @@ def _top_level_commas(
     """
     result = []
     # 四组 depth 分别跟踪 () [] {} <>；模板角括号只在调用者明确要求时启用，
-    # 避免把普通比较运算符 < / > 错当成模板边界。
+    # 避免把普通比较运算符 < / > 错当成模板边界；括号内的 < 和 > 不计。
     # The four depths track () [] {} <>; template angles count only when the caller
-    # asks for them, so plain comparisons < and > are not taken for template bounds.
+    # asks for them, so plain comparisons < and > are not taken for template bounds; < and >
+    # inside brackets do not count.
     round_depth = square_depth = brace_depth = angle_depth = 0
     for item in items:
         text = item.text
@@ -250,12 +249,12 @@ def _top_level_commas(
             brace_depth += 1
         elif text == "}":
             brace_depth = max(0, brace_depth - 1)
-        elif template_angles and text == "<" and not (round_depth or square_depth or brace_depth):
+        elif round_depth or square_depth or brace_depth:
+            continue
+        elif template_angles and text == "<":
             angle_depth += 1
-        elif template_angles and text == ">" and angle_depth:
-            angle_depth -= 1
-        elif template_angles and text == ">>" and angle_depth:
-            angle_depth = max(0, angle_depth - 2)
-        elif text == "," and not (round_depth or square_depth or brace_depth or angle_depth):
+        elif template_angles and text in (">", ">>") and angle_depth:
+            angle_depth = max(0, angle_depth - len(text))
+        elif text == "," and not angle_depth:
             result.append(item)
     return result, not (round_depth or square_depth or brace_depth or angle_depth)
