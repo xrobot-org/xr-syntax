@@ -2,80 +2,47 @@
 
 ## CI
 
-CI 在 Linux 和 Windows 上运行测试，并覆盖 Python 3.10、3.11、3.12、3.13 和 3.14，与 XRobot、LibXR_CppCodeGenerator 保持一致。
+CI 在 Linux 和 Windows 上用 Python 3.10 至 3.14 运行测试，与 XRobot、LibXR_CppCodeGenerator 支持的版本一致。
+质量检查包括 `ruff format --check`、`ruff check`、`mypy --strict`、`tools/check_bilingual_docs.py`，以及 wheel
+和 sdist 的打包检查。
 
-CI runs on Linux and Windows with Python 3.10 through 3.14, matching XRobot and LibXR_CppCodeGenerator.
-
-质量检查包括 Ruff 格式与规则检查、mypy、双语文档检查和 wheel/sdist 打包测试。  
-Quality checks include Ruff formatting and lint checks, mypy, bilingual documentation checks, and wheel/sdist packaging tests.
-
-## C++ round-trip corpus
-
-当前 native C++ parser 已验证的公开 corpus：  
-Current public corpus validated with the native C++ parser:
-
-- 1,850 files
-- 16,624,085 bytes
-- 0 round-trip failures
-- 4 files with parser diagnostics / 7 diagnostics
-
-核心检查 / Core check:
-
-```python
-tree = CppParser().parse(source)
-assert tree.render_bytes() == source
-```
-
-真实 corpus 曾发现 expression replacement 吞掉边缘 trivia 的问题，修复后加入了回归测试。  
-The real corpus exposed an expression-replacement bug that consumed edge trivia; the fix is covered by a regression test.
-
-## CMake
-
-CMake parser 已并入基础包，测试覆盖 CRLF round-trip、命令查询、builder 和结构化编辑。  
-The CMake parser ships in the base package, with tests for CRLF round trips, command queries, builders, and structured edits.
-
-## Builder 批量生成 / Batched Builders
-
-Builder-only 路径在 `build()` 前不调用 parser，最终完整文件只 parse 一次。C++ 和 CMake 都有 counting-parser 回归测试。  
-The builder-only path does not call the parser before `build()` and parses the complete file once. Counting-parser regression tests cover both C++ and CMake.
-
-Factory 仍然单独校验 `SyntaxFragment`；显式把 Factory fragment 传给 Builder 时，该片段已经在进入 Builder 前完成校验。  
-Factories still validate standalone `SyntaxFragment` objects. A factory fragment passed explicitly to a builder has already been validated before it reaches the builder.
-
-`require_clean=True` 覆盖生成结果的严格错误策略，默认模式则保留 parser diagnostics 供调用者处理。  
-`require_clean=True` covers the strict generation path, while the default build mode preserves parser diagnostics for the caller.
+CI runs the tests on Linux and Windows with Python 3.10 through 3.14, the versions XRobot and
+LibXR_CppCodeGenerator support. The quality checks are `ruff format --check`, `ruff check`,
+`mypy --strict`, `tools/check_bilingual_docs.py`, and packaging checks of the wheel and sdist.
 
 ## 解析器版本对比 / Comparing Parser Revisions
 
-改动 C++ parser 的内部实现时，用对比工具确认同一批源码的语法树和诊断没有变化：  
-When the internals of the C++ parser change, the comparison tool confirms that the syntax trees and diagnostics for a set of sources stay the same:
+`tools/compare_parsers.py` 对同一批源码比较两个版本的解析结果。它从 git 取出 `--base`（以及可选的 `--head`）
+版本的 `src`，省略 `--head` 时与工作区比较；每个文件的结果按先序列出全部 green 元素，再列出诊断的消息和字节
+范围。有差异时打印前几个文件的差异并返回 1，解析抛出的异常也作为结果参与比较。
+
+`tools/compare_parsers.py` compares the parsing results of two revisions on the same sources. It
+takes `src` of the `--base` revision (and optionally of `--head`) from git and compares it with the
+working tree when `--head` is omitted. Each file's result lists every green element in pre-order,
+then the message and byte span of each diagnostic. On differences it prints the diffs of the first
+files and returns 1; an exception raised by the parser is compared as a result too.
 
 ```bash
-python tools/compare_parsers.py --base HEAD path/to/sources more/sources
+python tools/compare_parsers.py --base HEAD ../libxr ../BSP ../Modules
 ```
 
-工具从 git 取出 `--base`（以及可选的 `--head`）版本的 `src`，省略 `--head` 时与工作区比较。每个文件的结果按先序列出全部 green 元素和诊断，有差异时打印前几个文件的差异并返回 1。  
-The tool takes `src` of the `--base` revision (and optionally of `--head`) from git and compares it with the working tree when `--head` is omitted. Each file's result lists every green element in pre-order plus the diagnostics; on differences it prints the diffs of the first files and returns 1.
+对比使用的语料是 libxr、BSP 和模块仓库中的 11,769 个 C/C++ 文件（242.8 MiB），其中包括 CMSIS、STM32 HAL、
+FreeRTOS 和 Eigen。
 
-2026-10 的解析器重写用它在 libxr、BSP 和模块的 11,242 个 C/C++ 文件（238 MiB）上对比：语法树和诊断完全一致；随后把赋值改为右结合，有 938 个文件发生变化，全部是连续赋值。  
-The 2026-10 parser rewrite was compared with it on 11,242 C/C++ files (238 MiB) from libxr, the BSPs, and the modules: syntax trees and diagnostics were identical. Making assignment right-associative afterwards changed 938 files, all of them in runs of assignments.
+The corpus used for comparisons is 11,769 C/C++ files (242.8 MiB) from libxr, the BSPs and the
+modules, including CMSIS, the STM32 HAL, FreeRTOS and Eigen.
 
-## 历史基线 / Historical Baselines
+## 结果记录 / Recorded Results
 
-旧 Tree-sitter C++ backend 曾跑过 4,420 files / 153,971,079 bytes 的 corpus；该结果只作为历史基线，不代表当前 native parser 的覆盖数字。  
-The former Tree-sitter C++ backend ran a 4,420-file / 153,971,079-byte corpus. That result is kept as a historical baseline and is not counted as native-parser coverage.
+| 日期 Date | 改动 Change | 结果 Result |
+| --- | --- | --- |
+| 2026-10-01 | 解析器重写为单遍扫描 / Parser rewritten as one pass | 11,242 个文件的语法树和诊断与重写前完全一致；随后赋值改为右结合，938 个文件变化，全部是连续赋值 / Syntax trees and diagnostics of 11,242 files identical to the old parser; making assignment right-associative afterwards changed 938 files, all in runs of assignments |
+| 2026-10-02 | 修正审查中发现的误读 / Fixes for misreadings found in review | 11,769 个文件全部解析并还原源码；9,801 个文件变化，主要是 124,793 个参数节点去掉了两端空白，以及 C 头文件 `extern "C"` 块中原先作为一个表达式的宏定义和声明被分别解析；抽查的语句级变化都更符合源码 / All 11,769 files parse and reproduce their source; 9,801 files change, mostly 124,793 parameter nodes losing their surrounding whitespace and the `extern "C"` blocks of C headers, whose defines and declarations were one expression before; sampled statement-level changes all read the source better |
+| 2026-10-02 | 消融发现的修正 / Fixes found by ablation | 11,769 个文件全部解析；9,436 个文件变化：函数返回类型去掉结尾空白（102,963 处）、模板非类型参数名（19,835 处）、类外定义的限定名（5,364 处）、`do` 语句带上它的 `while (...);`（1,192 处）/ All 11,769 files parse; 9,436 files change: function return types without trailing whitespace (102,963), names of non-type template parameters (19,835), qualified names of out-of-class definitions (5,364), `do` statements taking their `while (...);` (1,192) |
 
-## 性能基线 / Performance Baseline
+2026-10-02 的修正同时用 XRobot（397 个测试）和 LibXR_CppCodeGenerator（201 个测试）的测试套件验证。在同一
+进程中交替解析语料的十六分之一，解析时间增加约 1.5%，来自新解析出的 `extern "C"` 块内容。
 
-进入 consumer migration 前使用同一个脚本记录 parse、query、单次编辑和批量编辑耗时：  
-Use the same script before consumer migration to record parse, query, single-edit, and repeated-edit costs:
-
-```bash
-PYTHONPATH=src python tools/benchmark_source_model.py --sizes 10000 100000 1000000 --batch-edits 3
-```
-
-结果按 TSV 输出。基准只用于比较同一机器上的版本变化，不作为跨机器性能指标。  
-Results are emitted as TSV. Use them to compare revisions on the same machine rather than as cross-machine performance numbers.
-
-批量高层编辑会重复完整解析；迁移 consumer 时应优先合并修改后一次 reparse。  
-Repeated high-level edits trigger repeated full reparses; consumer migrations should batch changes before reparsing when possible.
+The 2026-10-02 fixes were also verified with the test suites of XRobot (397 tests) and
+LibXR_CppCodeGenerator (201 tests). Parsing a sixteenth of the corpus alternately in one process
+takes about 1.5 % longer, spent on the newly parsed contents of `extern "C"` blocks.
