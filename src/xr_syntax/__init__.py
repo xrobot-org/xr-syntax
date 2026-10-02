@@ -1,44 +1,25 @@
-"""定义 xr-syntax 顶层公共接口，集中导出语言无关语法核心以及 C++ 前端的常用类型。
-Public package surface for the language-neutral source model and C++ frontend.
+"""xr-syntax 的顶层接口：C++ 文档、解析器和语法树类型。
+Top-level interface of xr-syntax: the C++ document, its parser and the syntax-tree types.
 """
 
-from .core import (
+from xr_syntax.core import (
     Diagnostic,
     GreenChild,
     GreenNode,
     GreenToken,
     GreenTrivia,
-    ParserKindInfo,
-    ParserSchema,
     SourcePoint,
     SourceSpan,
     SyntaxElement,
-    SyntaxFragment,
     SyntaxNode,
     SyntaxToken,
     SyntaxTree,
     SyntaxTrivia,
 )
-from .cpp import (
-    CppBlockBuilder,
-    CppDocument,
-    CppFactory,
-    CppFileBuilder,
-    CppFunctionBuilder,
-    CppParser,
-    CppRegion,
-)
-
-# ---------------------------------------------------------------------------
-# 模块实现：定义 xr-syntax 顶层公共接口，集中导出语言无关语法核心以及 C++ 前端的常用类型。
-# ---------------------------------------------------------------------------
+from xr_syntax.cpp import CppDocument, CppParser, CppRegion
 
 __all__ = [
-    "CppBlockBuilder",
     "CppDocument",
-    "CppFactory",
-    "CppFileBuilder",
-    "CppFunctionBuilder",
     "CppParser",
     "CppRegion",
     "Diagnostic",
@@ -46,12 +27,9 @@ __all__ = [
     "GreenNode",
     "GreenToken",
     "GreenTrivia",
-    "ParserKindInfo",
-    "ParserSchema",
     "SourcePoint",
     "SourceSpan",
     "SyntaxElement",
-    "SyntaxFragment",
     "SyntaxNode",
     "SyntaxToken",
     "SyntaxTree",

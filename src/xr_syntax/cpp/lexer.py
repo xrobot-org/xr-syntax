@@ -496,7 +496,9 @@ def _raw_string_end(text: str, start: int, prefix: str) -> tuple[int, str | None
     # 用户定义字面量的后缀属于同一个 token。
     # A user-defined literal suffix belongs to the same token.
     match = _IDENTIFIER_TAIL_PATTERN.match(text, close + len(close_text))
-    assert match is not None  # 该模式能匹配空串 / the pattern matches the empty string
+    # 该模式能匹配空串。
+    # The pattern matches the empty string.
+    assert match is not None
     return match.end(), None
 
 

@@ -105,31 +105,6 @@ class SyntaxElement:
         return self._green.render()
 
     @property
-    def path(self) -> tuple[int, ...]:
-        # path 记录当前 snapshot 内的结构 child 索引。
-        # The path records structural child indices in the current snapshot.
-        """返回由 child 索引组成的快照内结构路径。
-        Return the snapshot-local structural path as child indices.
-        """
-        if self._parent is None:
-            return ()
-        return self._parent.path + (self._index,)
-
-    @property
-    def is_node(self) -> bool:
-        """判断该元素是否包装 GreenNode。
-        Report whether this element wraps a syntax node.
-        """
-        return isinstance(self._green, GreenNode)
-
-    @property
-    def is_token(self) -> bool:
-        """判断该元素是否包装 GreenToken。
-        Report whether this element wraps a syntax token.
-        """
-        return isinstance(self._green, GreenToken)
-
-    @property
     def is_trivia(self) -> bool:
         """判断该元素是否包装保留的 GreenTrivia。
         Report whether this element wraps preserved trivia.

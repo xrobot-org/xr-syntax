@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "xr-syntax"
 version = "0.2.0"
-description = "Structured C++ and CMake parsing, rewriting, and code generation for XRobot tooling."
+description = "Lossless C++ source parsing and structural queries for the XRobot tools."
 requires-python = ">=3.10"
 authors = [
     {name = "Xiao", email = "2592509183@qq.com"}
@@ -15,8 +15,8 @@ maintainers = [
 ]
 readme = "README.md"
 license = "Apache-2.0"
-license-files = ["LICENSE", "src/xr_syntax/cmake/grammar/LICENSE.tree-sitter-cmake"]
-keywords = ["C++", "CMake", "source transformation", "code generation", "XRobot"]
+license-files = ["LICENSE"]
+keywords = ["C++", "parser", "syntax tree", "lexer", "XRobot"]
 dependencies = []
 
 classifiers = [
@@ -48,11 +48,7 @@ dev = [
 where = ["src"]
 
 [tool.setuptools.package-data]
-xr_syntax = [
-    "py.typed",
-    "cmake/grammar/*.json",
-    "cmake/grammar/LICENSE.*",
-]
+xr_syntax = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

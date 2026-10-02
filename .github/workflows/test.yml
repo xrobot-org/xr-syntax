@@ -54,12 +54,9 @@ jobs:
           import importlib.metadata
 
           from xr_syntax.cpp import CppDocument
-          from xr_syntax.cmake import CMakeDocument
 
           cpp = b'#include "a.hpp"\r\nvoid f() { target(1); }\r\n'
-          cmake = b'project(Demo)\r\nadd_library(foo STATIC foo.cpp)\r\n'
           assert CppDocument.parse(cpp).render_bytes() == cpp
-          assert CMakeDocument.parse(cmake).render_bytes() == cmake
 
           requirements = importlib.metadata.requires("xr-syntax") or []
           base_requirements = [item for item in requirements if "extra ==" not in item]

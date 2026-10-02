@@ -1,56 +1,38 @@
-"""集中导出 C++ 原生解析器、grammar、查询视图、片段工厂和构建器。
-C++ frontend: parser, grammar metadata, structured queries, views, and builders.
+"""C++ 前端：解析器、文档、查询视图和词法工具。
+C++ frontend: the parser, documents, query views and lexical helpers.
 """
 
-from .builder import CppBlockBuilder, CppFileBuilder, CppFunctionBuilder
-from .document import CppDocument, CppRegion
-from .factory import CppFactory
-from .grammar import CPP_GRAMMAR, GRAMMAR_REVISION, GRAMMAR_VERSION
-from .invocation import (
+from xr_syntax.cpp.document import CppDocument, CppRegion
+from xr_syntax.cpp.invocation import (
     CppIdentifierOccurrence,
     CppInvocationView,
     identifier_occurrences,
     split_source_list,
 )
-from .lexical import CppLexicalToken, code_tokens, matching_delimiter
-from .parser import CppParser
-from .view import (
-    CppCallView,
+from xr_syntax.cpp.lexical import CppLexicalToken, code_tokens, matching_delimiter
+from xr_syntax.cpp.parser import CppParser
+from xr_syntax.cpp.view import (
     CppClassView,
     CppFunctionView,
     CppIncludeView,
     CppParameterView,
     CppTemplateParameterView,
-    CppVariableView,
 )
 
-# ---------------------------------------------------------------------------
-# 模块实现：集中导出 C++ 原生解析器、grammar、查询视图、片段工厂和构建器。
-# ---------------------------------------------------------------------------
-
 __all__ = [
-    "CPP_GRAMMAR",
-    "CppBlockBuilder",
-    "CppCallView",
     "CppClassView",
     "CppDocument",
-    "CppFactory",
-    "CppFileBuilder",
-    "CppFunctionBuilder",
     "CppFunctionView",
     "CppIdentifierOccurrence",
     "CppIncludeView",
-    "CppLexicalToken",
     "CppInvocationView",
+    "CppLexicalToken",
     "CppParameterView",
-    "code_tokens",
     "CppParser",
-    "CppTemplateParameterView",
-    "CppVariableView",
-    "matching_delimiter",
-    "identifier_occurrences",
-    "split_source_list",
-    "GRAMMAR_REVISION",
-    "GRAMMAR_VERSION",
     "CppRegion",
+    "CppTemplateParameterView",
+    "code_tokens",
+    "identifier_occurrences",
+    "matching_delimiter",
+    "split_source_list",
 ]

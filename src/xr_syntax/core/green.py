@@ -141,61 +141,6 @@ class GreenNode(_GreenMixin):
         """
         return sum(child.element.byte_width for child in self.children)
 
-    def replacing_child(self, index: int, element: GreenElement) -> GreenNode:
-        """返回替换指定 child 后的新 GreenNode，并保留原 edge 的 field 标签。
-        Return a copy with one child replaced while preserving that edge's field label.
-        """
-        if index < 0 or index >= len(self.children):
-            raise IndexError(index)
-        children = list(self.children)
-        original = children[index]
-        children[index] = GreenChild(element=element, field=original.field)
-        return GreenNode(
-            kind=self.kind,
-            children=tuple(children),
-            named=self.named,
-            missing=self.missing,
-            error=self.error,
-        )
-
-    def inserting_child(
-        self,
-        index: int,
-        element: GreenElement,
-        *,
-        field: str | None = None,
-    ) -> GreenNode:
-        """返回在指定结构索引插入 child 后的新 GreenNode。
-        Return a copy with a new child inserted at the requested structural index.
-        """
-        if index < 0 or index > len(self.children):
-            raise IndexError(index)
-        children = list(self.children)
-        children.insert(index, GreenChild(element=element, field=field))
-        return GreenNode(
-            kind=self.kind,
-            children=tuple(children),
-            named=self.named,
-            missing=self.missing,
-            error=self.error,
-        )
-
-    def removing_child(self, index: int) -> GreenNode:
-        """返回移除指定 child 后的新 GreenNode。
-        Return a copy without the selected child.
-        """
-        if index < 0 or index >= len(self.children):
-            raise IndexError(index)
-        children = list(self.children)
-        del children[index]
-        return GreenNode(
-            kind=self.kind,
-            children=tuple(children),
-            named=self.named,
-            missing=self.missing,
-            error=self.error,
-        )
-
 
 # ---------------------------------------------------------------------------
 # parser 的快速构造

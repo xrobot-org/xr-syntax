@@ -87,7 +87,5 @@ def test_document_queries_reuse_the_lexing_of_the_parse() -> None:
     document = CppDocument.parse(source)
     assert document.code_tokens() == code_tokens(source)
     assert document.identifier_occurrences() == identifier_occurrences(source)
-    edited = document.remove(document.root.first_descendant("comment"))
-    assert edited.code_tokens() == code_tokens(edited.render())
     with pytest.raises(ValueError, match="^unclosed block comment$"):
         CppDocument.parse("int x; /* open").code_tokens()

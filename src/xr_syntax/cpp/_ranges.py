@@ -131,8 +131,11 @@ class _RangeMixin(_ParserSupport):
         return end
 
     def _skip_group(self, position: int, high: int) -> int:
-        """position 处是已配对、内部没有多余闭括号的开括号时，返回其闭括号之后的位置（不超过 high），
-        否则返回 position + 1。
+        """跳过 position 处的括号组。
+        Skip the delimiter group at position.
+
+        position 处是已配对、内部没有多余闭括号的开括号时，返回其闭括号之后的位置（不超过
+        high），否则返回 position + 1。
         The position after the closing delimiter when position holds a paired opening delimiter
         whose group contains no stray closing delimiter (at most high), and position + 1 otherwise.
 

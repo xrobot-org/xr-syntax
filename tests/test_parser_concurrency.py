@@ -6,7 +6,6 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 
-from xr_syntax.cmake import CMakeParser
 from xr_syntax.cpp import CppParser
 
 
@@ -31,15 +30,4 @@ def test_cpp_parser_instance_supports_concurrent_parse_calls() -> None:
     """
     parser = CppParser()
     sources = [f"void f{i}() {{ target({i}); }}\n".encode() for i in range(64)]
-    assert _run_many(parser, sources) == sources
-
-
-def test_cmake_parser_instance_supports_concurrent_parse_calls() -> None:
-    """同一个 CMakeParser 实例可并发处理独立源码。
-    A shared CMakeParser instance can parse independent sources concurrently.
-    """
-    parser = CMakeParser()
-    sources = [
-        f"project(Demo{i})\nadd_library(lib{i} STATIC file{i}.cpp)\n".encode() for i in range(64)
-    ]
     assert _run_many(parser, sources) == sources

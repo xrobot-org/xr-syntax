@@ -14,10 +14,6 @@ from xr_syntax.i18n import tr
 from ._lexical_support import _preprocessor_mask
 from .lexer import _LITERAL_KINDS, _Lexed, lex
 
-# ---------------------------------------------------------------------------
-# 模块实现：提供带字符/字节位置的公共 C++ 词法 token 查询。
-# ---------------------------------------------------------------------------
-
 
 @dataclass(frozen=True)
 class CppLexicalToken:
@@ -70,6 +66,8 @@ def matching_delimiter(tokens: Sequence[CppLexicalToken], start: int) -> int:
     Return the token index matching the opening delimiter at start.
     """
     # 普通分隔符直接入栈；模板上下文还要处理 >> 一次关闭两层尖括号。
+    # Ordinary delimiters are pushed as they come; in a template context >> closes two
+    # angle brackets at once.
     pairs = {"(": ")", "[": "]", "{": "}", "<": ">"}
     expected = pairs.get(tokens[start].text)
     if expected is None:

@@ -10,8 +10,6 @@ from itertools import accumulate, compress
 from xr_syntax.core import (
     GreenElement,
     GreenNode,
-    ParserKindInfo,
-    ParserSchema,
     SyntaxTree,
     decode_source,
     encode_source,
@@ -24,8 +22,7 @@ from ._declarator import _DeclaratorMixin
 from ._expression import _ExpressionMixin
 from ._ranges import _deduplicate_replacements, _RangeMixin
 from ._support import _Replacement
-from .grammar import CPP_GRAMMAR
-from .lexer import _CONTROL, _PUNCTUATORS, _QUALIFIERS, _STORAGE, _TYPE_WORDS, _Lexed, lex
+from .lexer import _CONTROL, _Lexed, lex
 
 _CLASS_KEYWORDS = frozenset({"class", "struct", "union"})
 _ACCESS_KEYWORDS = frozenset({"public", "private", "protected"})
@@ -59,48 +56,13 @@ _MAX_NESTING = 100
 _RESERVED_FRAMES = 64
 
 
-# 对外 parser 只组织“词法扫描 -> 结构解析 -> round-trip 校验”三阶段；
-# 每次 parse 都创建独立 _StructuralParser，因此同一个 CppParser 可并发复用。
-# The public parser only runs the three stages lexing, structural parsing and round-trip check;
-# every parse creates its own _StructuralParser, so one CppParser can be shared concurrently.
+# 每次解析都创建独立的 _StructuralParser，同一个 CppParser 可以被多个线程同时使用。
+# Every parse creates its own _StructuralParser, so threads can share one CppParser.
 class CppParser:
-    """无损 C++ source parser；parse 调用之间不共享可变状态。
-    Lossless C++ parser whose parse calls do not share mutable parsing state.
+    """无损的 C++ 解析器：词法扫描、结构解析，再检查结果逐字节还原源码。
+    Lossless C++ parser: lexing, structural parsing, then a check that the result reproduces
+    the source byte for byte.
     """
-
-    grammar = CPP_GRAMMAR
-
-    def __init__(self) -> None:
-        """初始化 parser，并构造稳定的运行时 kind/field 表。
-        Initialize the native parser and construct its stable runtime kind/field table.
-        """
-        refs: set[tuple[str, bool]] = {(node.kind, node.named) for node in self.grammar.nodes}
-        for node in self.grammar.nodes:
-            refs.update((item.kind, item.named) for item in node.subtypes)
-            if node.children is not None:
-                refs.update((item.kind, item.named) for item in node.children.types)
-            for _, slot in node.fields:
-                refs.update((item.kind, item.named) for item in slot.types)
-        refs.update((punctuator, False) for punctuator in _PUNCTUATORS)
-        refs.update((word, False) for word in _TYPE_WORDS | _STORAGE | _QUALIFIERS)
-        ordered = sorted(refs, key=lambda item: (item[0], item[1]))
-        fields = sorted(
-            {field_name for node in self.grammar.nodes for field_name, _ in node.fields}
-        )
-        self._schema = ParserSchema(
-            "cpp",
-            tuple(
-                ParserKindInfo(index, name, named) for index, (name, named) in enumerate(ordered)
-            ),
-            tuple(fields),
-        )
-
-    @property
-    def schema(self) -> ParserSchema:
-        """返回 xr-syntax native C++ parser 的 kind/field 表。
-        Return the runtime kind/field schema for the parser.
-        """
-        return self._schema
 
     def parse(self, source: str | bytes, *, source_name: str | None = None) -> SyntaxTree:
         """解析源码并保证结果可逐字节还原。
@@ -531,8 +493,11 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
         return (start, class_end, node, None)
 
     def _class_head(self, low: int, high: int) -> tuple[tuple[int, int] | None, int] | None:
-        """识别类头：属性、可带 :: 限定和模板实参的类名（名前的宏名跳过）、final、基类列表，
-        直到类体的 {。不是类定义（前向声明、详细类型说明符、函数）时返回 None。
+        """识别类头，直到类体的 {。
+        Recognize a class head up to the { of the class body.
+
+        类头包括属性、可带 :: 限定和模板实参的类名（名前的宏名跳过）、final、基类列表。
+        不是类定义（前向声明、详细类型说明符、函数）时返回 None。
         Recognize a class head: attributes, a class name that may be ::-qualified and carry
         template arguments (macro names before it are skipped), final and a base clause, up to
         the { of the body. None when the keyword does not start a definition (a forward

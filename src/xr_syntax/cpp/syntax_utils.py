@@ -142,10 +142,3 @@ def find_function_declarator(node: SyntaxNode) -> SyntaxNode | None:
         return node
     found = node.first_descendant("function_declarator")
     return found if isinstance(found, SyntaxNode) else None
-
-
-def named_elements(node: SyntaxNode, kinds: set[str]) -> tuple[SyntaxElement, ...]:
-    """返回给定元素后代中所有 named node/token。
-    Collect descendants whose kind is present in the requested set.
-    """
-    return tuple(child for child in node.descendants() if child.kind in kinds)

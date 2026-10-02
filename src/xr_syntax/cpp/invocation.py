@@ -12,10 +12,6 @@ from xr_syntax.i18n import tr
 from ._lexical_support import _preprocessor_mask
 from .lexer import _Lexed, _Lexeme, lex
 
-# ---------------------------------------------------------------------------
-# 模块实现：提供宏式 NAME(...) invocation 的词法查询和逗号列表切分。
-# ---------------------------------------------------------------------------
-
 
 @dataclass(frozen=True)
 class CppInvocationView:
@@ -71,6 +67,9 @@ class CppIdentifierOccurrence:
 
 # 宏参数和模板参数的逗号不能用 str.split(',')：只有所有括号/方括号/花括号
 # （以及可选模板尖括号）depth 都为 0 时，逗号才是当前列表的分隔符。
+# Commas of macro and template arguments cannot be split with str.split(','): a
+# comma separates the list only where the parenthesis, bracket and brace depths (and
+# optionally the template-angle depth) are all 0.
 def split_source_list(source: str, *, template_angles: bool = False) -> tuple[str, ...]:
     """按顶层逗号切分源码列表，并按需把模板角括号视为嵌套。
     Split source on top-level commas, optionally treating template angles as nesting.
@@ -141,6 +140,9 @@ def _identifier_occurrences_of(lexed: _Lexed) -> tuple[CppIdentifierOccurrence, 
 
 # XR_REGISTER 这类宏式调用可能不是正常 C++ call_expression，因此这里故意走
 # 词法查询：跳过注释/预处理行，精确匹配 NAME 后紧跟的括号区间。
+# Macro-style calls such as XR_REGISTER need not be ordinary C++ call expressions, so
+# this is a lexical query: it skips comments and preprocessor lines and matches the
+# parenthesized range right after NAME.
 def find_invocations(
     tree: SyntaxTree,
     name: str,
@@ -231,6 +233,8 @@ def _top_level_commas(
     result = []
     # 四组 depth 分别跟踪 () [] {} <>；模板角括号只在调用者明确要求时启用，
     # 避免把普通比较运算符 < / > 错当成模板边界。
+    # The four depths track () [] {} <>; template angles count only when the caller
+    # asks for them, so plain comparisons < and > are not taken for template bounds.
     round_depth = square_depth = brace_depth = angle_depth = 0
     for item in items:
         text = item.text

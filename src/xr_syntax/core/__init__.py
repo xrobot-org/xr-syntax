@@ -1,51 +1,31 @@
-"""集中导出不可变语法树、grammar、源码范围、文档和 parser schema 等核心抽象。
-Core immutable syntax, grammar, span, document, and parser-schema abstractions.
+"""集中导出不可变语法树、源码范围、诊断和文档等核心抽象。
+Core abstractions: the immutable syntax tree, source spans, diagnostics and documents.
 """
 
-from .diagnostic import Diagnostic
-from .document import SyntaxDocument, SyntaxParserProtocol
-from .fragment import SourceDraft, SyntaxFragment
-from .grammar import (
-    GrammarNodeSpec,
-    GrammarSlot,
-    GrammarTypeRef,
-    LanguageGrammar,
-)
-from .green import GreenChild, GreenElement, GreenNode, GreenToken, GreenTrivia
-from .parser_schema import ParserKindInfo, ParserSchema
-from .red import SyntaxElement, SyntaxNode, SyntaxToken, SyntaxTrivia
-from .span import SourcePoint, SourceSpan
-from .text import decode_source, encode_source
-from .tree import SyntaxTree
-
-# ---------------------------------------------------------------------------
-# 模块实现：集中导出不可变语法树、grammar、源码范围、文档和 parser schema 等核心抽象。
-# ---------------------------------------------------------------------------
+from xr_syntax.core.diagnostic import Diagnostic
+from xr_syntax.core.document import SyntaxDocument, SyntaxParserProtocol
+from xr_syntax.core.green import GreenChild, GreenElement, GreenNode, GreenToken, GreenTrivia
+from xr_syntax.core.red import SyntaxElement, SyntaxNode, SyntaxToken, SyntaxTrivia
+from xr_syntax.core.span import SourcePoint, SourceSpan
+from xr_syntax.core.text import decode_source, encode_source
+from xr_syntax.core.tree import SyntaxTree
 
 __all__ = [
     "Diagnostic",
-    "decode_source",
-    "encode_source",
     "GreenChild",
     "GreenElement",
     "GreenNode",
     "GreenToken",
     "GreenTrivia",
-    "GrammarNodeSpec",
-    "GrammarSlot",
-    "GrammarTypeRef",
-    "LanguageGrammar",
-    "ParserKindInfo",
-    "ParserSchema",
-    "SourceDraft",
     "SourcePoint",
     "SourceSpan",
     "SyntaxDocument",
-    "SyntaxFragment",
     "SyntaxElement",
     "SyntaxNode",
     "SyntaxParserProtocol",
     "SyntaxToken",
     "SyntaxTree",
     "SyntaxTrivia",
+    "decode_source",
+    "encode_source",
 ]

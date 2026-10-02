@@ -44,9 +44,9 @@ def test_complex_declarator_type_spelling() -> None:
     Verify that source-level type spelling for complex declarators can be reconstructed completely.
     """
     document = CppDocument.parse(
-        "void f(int (*cb)(double), int (&arr)[3], const X* p = nullptr) {}"
+        "class F { public: F(int (*cb)(double), int (&arr)[3], const X* p = nullptr) {} };"
     )
-    parameters = document.function_views("f")[0].parameters
+    parameters = document.class_views("F")[0].constructors()[0].parameters
     assert [parameter.name for parameter in parameters] == ["cb", "arr", "p"]
     assert [parameter.type for parameter in parameters] == [
         "int (*)(double)",
@@ -85,48 +85,16 @@ def test_deleted_special_members_are_structured_but_not_callable() -> None:
     assert len(view.constructors(public_only=True, callable_only=True)) == 1
 
 
-def test_call_view_arguments() -> None:
-    """验证调用视图按源码顺序返回完整实参。
-    Verify that call views return complete arguments in source order.
+def test_include_views_give_the_header_and_its_form() -> None:
+    """验证 include 视图给出头文件名以及是否为尖括号形式。
+    Verify that include views give the header name and whether it uses angle brackets.
     """
-    document = CppDocument.parse("void f() { target(a, b + c); }")
-    call = document.call_views("target")[0]
-    assert call.callee == "target"
-    assert [argument.text for argument in call.arguments] == ["a", "b + c"]
-
-
-def test_include_and_variable_views_cover_file_and_function_scope() -> None:
-    """验证 include 与变量视图同时覆盖文件作用域和函数作用域。
-    Verify that include and variable views cover both file and function scope.
-    """
-    document = CppDocument.parse(
-        '#include "local.hpp"\n'
-        "#include <vector>\n"
-        "static int global_value = 3;\n"
-        "void f() {\n"
-        "  static Foo local = Foo(arg);\n"
-        "  auto& ref = global_value;\n"
-        "}\n"
-    )
-
+    document = CppDocument.parse('#include "local.hpp"\n#include <vector>\n')
     includes = document.include_views()
     assert [(item.header, item.system) for item in includes] == [
         ("local.hpp", False),
         ("vector", True),
     ]
-
-    variables = {item.name: item for item in document.variable_views()}
-    assert variables["global_value"].base_type == "int"
-    assert variables["global_value"].storage == ("static",)
-    assert variables["global_value"].initializer == "3"
-    assert variables["global_value"].global_scope
-
-    assert variables["local"].base_type == "Foo"
-    assert variables["local"].initializer == "Foo(arg)"
-    assert not variables["local"].global_scope
-    assert variables["ref"].base_type == "auto"
-    assert variables["ref"].initializer == "global_value"
-    assert not variables["ref"].global_scope
 
 
 def test_constructor_declarations_with_defaults_remain_functions() -> None:
@@ -143,7 +111,7 @@ def test_constructor_declarations_with_defaults_remain_functions() -> None:
         ["gain"],
     ]
     assert [item.parameters[0].default for item in constructors] == ["10", "1.0f"]
-    assert not document.call_views("Foo")
+    assert not document.nodes("call_expression")
 
 
 def test_template_parameter_defaults_keep_nested_template_commas() -> None:
@@ -186,10 +154,9 @@ def test_a_keyword_that_does_not_start_a_definition_is_no_class() -> None:
         "class EXPORT_API Led final : public Base<(1)> { public: Led(int a) {} };\n"
     )
     document = CppDocument.parse(source)
-    assert [
-        (node.kind, view.name)
-        for node, view in zip(document.classes(), document.class_views(), strict=True)
-    ] == [("class_specifier", "Led")]
+    assert [(view.node.kind, view.name) for view in document.class_views()] == [
+        ("class_specifier", "Led")
+    ]
     assert [f.name for f in document.class_views("Led")[0].constructors()] == ["Led"]
 
 

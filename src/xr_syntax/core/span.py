@@ -6,10 +6,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-# ---------------------------------------------------------------------------
-# 模块实现：定义语法节点和诊断共同使用的字节范围与行列位置。
-# ---------------------------------------------------------------------------
-
 
 @dataclass(frozen=True, order=True)
 class SourcePoint:

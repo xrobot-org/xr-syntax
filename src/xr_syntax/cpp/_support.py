@@ -6,10 +6,6 @@ from __future__ import annotations
 
 from xr_syntax.core import Diagnostic, GreenChild, GreenElement, GreenNode
 
-# ---------------------------------------------------------------------------
-# 模块实现：Native C++ parser 各结构阶段共享的严格类型合同。
-# ---------------------------------------------------------------------------
-
 # (start, end, element, field)：用 element 替换 lexeme 区间 [start, end)，边上带 field。
 # (start, end, element, field): element replaces the lexeme range [start, end), with field on the
 # edge.

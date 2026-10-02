@@ -29,11 +29,8 @@ def test_common_queries() -> None:
     Verify the common CppDocument queries for functions, calls, and declarations.
     """
     document = CppDocument.parse(SOURCE)
-    assert len(document.includes()) == 1
-    assert len(document.classes("Device")) == 1
-    assert len(document.functions("app_main")) == 1
-    assert len(document.calls("XR_REGISTER")) == 1
-    assert len(document.calls("XROBOT_MAIN")) == 1
+    assert len(document.include_views()) == 1
+    assert len(document.class_views("Device")) == 1
 
 
 def test_user_region() -> None:
@@ -114,5 +111,5 @@ def test_multiline_preprocessor_define_does_not_swallow_following_class() -> Non
 
     assert document.render() == source
     assert not document.diagnostics
-    assert len(document.classes("Sensor")) == 1
+    assert len(document.class_views("Sensor")) == 1
     assert len(document.class_views("Sensor")[0].constructors(public_only=True)) == 1

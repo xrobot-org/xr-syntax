@@ -13,12 +13,10 @@ from xr_syntax.core import (
     SyntaxElement,
     SyntaxNode,
     SyntaxParserProtocol,
-    SyntaxToken,
     SyntaxTree,
     encode_source,
 )
 
-from .grammar import CPP_GRAMMAR
 from .invocation import (
     CppIdentifierOccurrence,
     CppInvocationView,
@@ -28,14 +26,7 @@ from .invocation import (
 from .lexer import _Lexed, lex
 from .lexical import CppLexicalToken, _code_tokens_of
 from .parser import CppParser
-from .syntax_utils import declaration_name, field_text
-from .view import (
-    CppCallView,
-    CppClassView,
-    CppFunctionView,
-    CppIncludeView,
-    CppVariableView,
-)
+from .view import CppClassView, CppIncludeView
 
 # ---------------------------------------------------------------------------
 # 受保护源码区域
@@ -71,7 +62,6 @@ class CppDocument(SyntaxDocument):
     __slots__ = ("_lexed",)
 
     language = "cpp"
-    grammar = CPP_GRAMMAR
 
     def __init__(
         self,
@@ -139,30 +129,6 @@ class CppDocument(SyntaxDocument):
             raise ValueError(lexed.diagnostics[0].message)
         return _identifier_occurrences_of(lexed)
 
-    def is_expression(self, element: SyntaxElement) -> bool:
-        """依据 C++ grammar subtype 图判断元素是否属于 expression。
-        Classify an element through the packaged grammar subtype graph.
-        """
-        if not isinstance(element, (SyntaxNode, SyntaxToken)):
-            return False
-        return self.grammar.is_subtype(
-            element.kind,
-            "expression",
-            actual_named=element.named,
-        )
-
-    def is_statement(self, element: SyntaxElement) -> bool:
-        """依据 C++ grammar subtype 图判断元素是否属于 statement。
-        Classify an element through the packaged grammar subtype graph.
-        """
-        if not isinstance(element, (SyntaxNode, SyntaxToken)):
-            return False
-        return self.grammar.is_subtype(
-            element.kind,
-            "statement",
-            actual_named=element.named,
-        )
-
     def replace_region_body(self, region: CppRegion, body: str) -> CppDocument:
         """替换当前文档中一个已验证区域的 body。
         Replace the body of a validated region owned by this document snapshot.
@@ -185,68 +151,23 @@ class CppDocument(SyntaxDocument):
         if region.body_span.end > source_size:
             raise ValueError("region body span exceeds the current source range")
 
-    def includes(self) -> tuple[SyntaxNode, ...]:
-        """按源码顺序返回原始 preproc_include 节点。
-        Return raw preprocessor include syntax nodes.
-        """
-        return self.nodes("preproc_include")
-
     def include_views(self) -> tuple[CppIncludeView, ...]:
-        """为全部 include 节点创建 CppIncludeView。
-        Return typed convenience views for all include directives.
+        """按源码顺序返回全部 #include 的视图。
+        Views of all #include directives, in source order.
         """
-        return tuple(CppIncludeView(node) for node in self.includes())
-
-    def comments(self) -> tuple[SyntaxElement, ...]:
-        """按源码顺序返回 parser 识别的注释元素。
-        Return parser comment elements in source order.
-        """
-        return self.elements("comment")
-
-    def functions(self, name: str | None = None) -> tuple[SyntaxNode, ...]:
-        """返回函数定义，并可按源码级函数名过滤。
-        Return function definitions, optionally filtered by source-level name.
-        """
-        nodes = self.nodes("function_definition")
-        if name is None:
-            return nodes
-        return tuple(node for node in nodes if declaration_name(node) == name)
-
-    def classes(self, name: str | None = None) -> tuple[SyntaxNode, ...]:
-        """返回 class/struct 定义，并可按源码级名称过滤。
-        Return class/struct specifiers, optionally filtered by source-level name.
-        """
-        nodes = self._nodes_grouped(("class_specifier", "struct_specifier"))
-        if name is None:
-            return nodes
-        return tuple(node for node in nodes if field_text(node, "name") == name)
-
-    def calls(self, name: str | None = None) -> tuple[SyntaxNode, ...]:
-        """返回调用表达式，并可按精确 callee 源码文本过滤。
-        Return call expressions, optionally filtered by exact callee source text.
-        """
-        nodes = self.nodes("call_expression")
-        if name is None:
-            return nodes
-        return tuple(node for node in nodes if field_text(node, "function") == name)
-
-    def function_views(self, name: str | None = None) -> tuple[CppFunctionView, ...]:
-        """把匹配的函数节点包装为 CppFunctionView。
-        Wrap matching function definitions in CppFunctionView.
-        """
-        return tuple(CppFunctionView(node) for node in self.functions(name))
+        return tuple(CppIncludeView(node) for node in self.nodes("preproc_include"))
 
     def class_views(self, name: str | None = None) -> tuple[CppClassView, ...]:
-        """把匹配的类节点包装为 CppClassView。
-        Wrap matching class or struct specifiers in CppClassView.
+        """按源码顺序返回 class 和 struct 的视图；给出 name 时只返回同名的。
+        Views of the classes and structs in source order; with name, only those of that name.
         """
-        return tuple(CppClassView(node) for node in self.classes(name))
-
-    def call_views(self, name: str | None = None) -> tuple[CppCallView, ...]:
-        """把匹配的调用节点包装为 CppCallView。
-        Wrap matching call expressions in CppCallView.
-        """
-        return tuple(CppCallView(node) for node in self.calls(name))
+        kinds = frozenset({"class_specifier", "struct_specifier"})
+        views = (
+            CppClassView(element)
+            for element in self.root.descendants(kinds=kinds, include_self=True)
+            if isinstance(element, SyntaxNode)
+        )
+        return tuple(view for view in views if name is None or view.name == name)
 
     def invocation_views(
         self,
@@ -261,50 +182,6 @@ class CppDocument(SyntaxDocument):
             self.tree, name, template_angles=template_angles, lexed=self._lexing()
         )
 
-    # declaration 视图只按当前 syntax fields 识别变量 declarator。
-    # Declaration views classify variable declarators from the current syntax fields.
-    def variable_views(
-        self,
-        name: str | None = None,
-        *,
-        global_scope: bool | None = None,
-    ) -> tuple[CppVariableView, ...]:
-        """返回变量声明视图，并可按全局/局部作用域过滤。
-        Return variable-like declarations, optionally filtered by name and lexical scope.
-        """
-        result: list[CppVariableView] = []
-        for declaration in self.nodes("declaration"):
-            for declarator in declaration.children_by_field("declarator"):
-                if isinstance(declarator, SyntaxNode) and (
-                    declarator.kind == "function_declarator"
-                    or declarator.first_descendant("function_declarator") is not None
-                ):
-                    continue
-                view = CppVariableView(declaration, declarator)
-                if name is not None and view.name != name:
-                    continue
-                if global_scope is not None and view.global_scope != global_scope:
-                    continue
-                result.append(view)
-        return tuple(result)
-
-    def declarations(self) -> tuple[SyntaxNode, ...]:
-        """返回文档中的声明节点集合。
-        Return common declaration-like syntax nodes.
-        """
-        return self._nodes_grouped(("declaration", "function_definition", "template_declaration"))
-
-    def _nodes_grouped(self, kinds: tuple[str, ...]) -> tuple[SyntaxNode, ...]:
-        """一次遍历取出这些 kind 的节点，按 kinds 的顺序分组排列，组内保持源码顺序。
-        The nodes of these kinds from one walk, grouped in the order of kinds, each group in
-        source order.
-        """
-        groups: dict[str, list[SyntaxNode]] = {kind: [] for kind in kinds}
-        for element in self.root.descendants(kinds=frozenset(kinds), include_self=True):
-            if isinstance(element, SyntaxNode):
-                groups[element.kind].append(element)
-        return tuple(node for kind in kinds for node in groups[kind])
-
     def user_regions(self) -> tuple[CppRegion, ...]:
         """识别并返回成对的 User Code Begin/End 区域。
         Find paired STM32-style User Code Begin/End comment regions.
@@ -313,26 +190,6 @@ class CppDocument(SyntaxDocument):
             kind="user",
             begin=re.compile(r"/\*\s*User Code Begin(?:\s+(.+?))?\s*\*/"),
             end=re.compile(r"/\*\s*User Code End(?:\s+(.+?))?\s*\*/"),
-        )
-
-    def format_regions(self) -> tuple[CppRegion, ...]:
-        """识别并返回 clang-format off/on 区域。
-        Find paired clang-format off/on comment regions.
-        """
-        return self._paired_comment_regions(
-            kind="format",
-            begin=re.compile(r"//\s*clang-format\s+off\b"),
-            end=re.compile(r"//\s*clang-format\s+on\b"),
-        )
-
-    def lint_regions(self) -> tuple[CppRegion, ...]:
-        """识别并返回 NOLINTBEGIN/NOLINTEND 区域。
-        Find paired NOLINTBEGIN/NOLINTEND comment regions.
-        """
-        return self._paired_comment_regions(
-            kind="lint",
-            begin=re.compile(r"//\s*NOLINTBEGIN\b"),
-            end=re.compile(r"//\s*NOLINTEND\b"),
         )
 
     # 区域标记由普通 C++ 注释配对得到，实现在 document 层。
@@ -350,7 +207,7 @@ class CppDocument(SyntaxDocument):
         source = self.render_bytes()
         stack: list[tuple[SyntaxElement, str | None]] = []
         regions: list[CppRegion] = []
-        for comment in sorted(self.comments(), key=lambda node: node.span.start):
+        for comment in self.elements("comment"):
             begin_match = begin.fullmatch(comment.text.strip())
             if begin_match:
                 name = begin_match.group(1).strip() if begin_match.lastindex else None
