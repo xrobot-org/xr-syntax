@@ -194,13 +194,6 @@ class CppFunctionView:
         """
         return self.node.first_descendant("delete_method_clause") is not None
 
-    @property
-    def defaulted(self) -> bool:
-        """判断特殊成员是否在语法上声明为 = default。
-        Report whether this member is syntactically declared '= default'.
-        """
-        return self.node.first_descendant("default_method_clause") is not None
-
 
 # class/member 便捷视图只解释源码结构，不解析继承构造、重载可行性
 # 或编译器类型转换。

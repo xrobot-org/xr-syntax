@@ -206,21 +206,6 @@ class SyntaxNode(SyntaxElement):
         """
         return next((child for child in self.children if child.field == field), None)
 
-    def children_by_field(self, field: str) -> tuple[SyntaxElement, ...]:
-        """返回重复 field 上的全部 children。
-        Return all children carried by a repeated parser field.
-        """
-        return tuple(child for child in self.children if child.field == field)
-
-    @property
-    def field_names(self) -> tuple[str, ...]:
-        """按首次出现顺序返回当前节点实际存在的 field 名称。
-        Return field labels present on this syntax node.
-        """
-        return tuple(
-            dict.fromkeys(child.field for child in self.children if child.field is not None)
-        )
-
     def descendants(
         self,
         kind: str | None = None,

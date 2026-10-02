@@ -7,11 +7,31 @@ from __future__ import annotations
 import argparse
 import sys
 import textwrap
+import unicodedata
 
 import pytest
 
 from xr_syntax.cpp import code_tokens
-from xr_syntax.i18n import _width, _wrap, chinese, localize_argparse, tr
+from xr_syntax.i18n import chinese, localize_argparse, tr
+
+
+def _help_lines(text: str, columns: int, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """帮助文字 text 在终端宽 columns 列时折成的各行，去掉缩进。
+    The lines help text takes at a terminal width of columns, without indentation.
+    """
+    localize_argparse()
+    monkeypatch.setenv("COLUMNS", str(columns))
+    parser = argparse.ArgumentParser(prog="tool", add_help=False)
+    parser.add_argument("name", help=text)
+    block = parser.format_help().split("\n  name", 1)[1].splitlines()
+    return [line.strip() for line in block if line.strip()]
+
+
+def _columns(text: str) -> int:
+    """text 在终端中占的列数：宽字符和全角字符占 2 列。
+    The terminal columns text takes: wide and fullwidth characters take 2.
+    """
+    return sum(2 if unicodedata.east_asian_width(char) in "WF" else 1 for char in text)
 
 
 def test_the_first_set_variable_chooses_the_language(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -75,11 +95,28 @@ def test_argparse_texts_are_translated_in_chinese(
     )
 
 
-def test_wide_text_wraps_by_column_width() -> None:
-    assert _wrap("甲乙丙丁", 4) == ["甲乙", "丙丁"]
-    assert _wrap("甲，乙", 2) == ["甲，", "乙"]
-    assert _wrap("乙（甲）丙", 6) == ["乙", "（甲）", "丙"]
-    assert _wrap("用 java -jar 启动", 8) == ["用 java", "-jar 启", "动"]
+# 终端宽 17 列时帮助文字有 11 列。
+# At a terminal width of 17 columns, help text has 11 columns.
+@pytest.mark.parametrize(
+    ("text", "lines"),
+    [
+        pytest.param("甲乙丙丁戊己庚辛", ["甲乙丙丁戊", "己庚辛"], id="wide-characters"),
+        pytest.param("甲乙丙丁戊，己", ["甲乙丙丁", "戊，己"], id="no-comma-at-line-start"),
+        pytest.param("甲乙丙丁（戊己）庚", ["甲乙丙丁", "（戊己）庚"], id="no-bracket-at-line-end"),
+        pytest.param("用 java -jar 启动程序", ["用 java", "-jar 启动程", "序"], id="whole-words"),
+    ],
+)
+def test_wide_help_text_wraps_by_column_width(
+    text: str, lines: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert _help_lines(text, 17, monkeypatch) == lines
+
+
+def test_english_help_text_wraps_as_argparse_wraps_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    english = "where a missing LibXR is cloned from: auto, github, or a base or repository URL"
+    # 终端宽 40 列时帮助文字有 30 列。
+    # At a terminal width of 40 columns, help text has 30 columns.
+    assert _help_lines(english, 40, monkeypatch) == textwrap.wrap(english, 30)
 
 
 def test_help_holding_chinese_wraps_by_column_width(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -97,10 +134,6 @@ def test_help_holding_chinese_wraps_by_column_width(monkeypatch: pytest.MonkeyPa
     # The first help line shares the line of the option.
     body = [lines[first].split("SOURCE", 1)[1], *lines[first + 1 :]]
     assert "".join(line.strip() for line in body).replace(" ", "") == text.replace(" ", "")
-    assert all(_width(line) <= 58 for line in lines[first:-1])
+    assert all(_columns(line) <= 58 for line in lines[first:-1])
     assert body[-1].strip() == "https://github.com/xrobot-org/libxr.git"
     assert not any(line.strip()[:1] in "，。、；：）" for line in body)
-
-    english = "where a missing LibXR is cloned from: auto, github, or a base or repository URL"
-    formatter = argparse.HelpFormatter("tool")
-    assert formatter._split_lines(english, 30) == textwrap.wrap(english, 30)

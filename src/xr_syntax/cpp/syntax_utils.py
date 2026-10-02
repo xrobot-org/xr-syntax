@@ -61,48 +61,6 @@ def declaration_name(node: SyntaxNode) -> str | None:
     return None if element is None else element.text
 
 
-def declarator_name_element(element: SyntaxElement) -> SyntaxElement | None:
-    """沿 declarator 结构递归查找实际名称元素。
-    Locate the terminal name element inside a C++ declarator subtree.
-    """
-    current: SyntaxElement | None = element
-    while isinstance(current, SyntaxNode):
-        if current.kind in {"destructor_name", "operator_name"}:
-            return current
-        direct = current.child_by_field("declarator")
-        if direct is not None:
-            current = direct
-            continue
-        for kind in (
-            "identifier",
-            "field_identifier",
-            "type_identifier",
-            "operator_name",
-            "destructor_name",
-        ):
-            found = current.first_descendant(kind)
-            if found is not None:
-                return found
-        return None
-    if current is not None and current.kind in {
-        "identifier",
-        "field_identifier",
-        "type_identifier",
-        "operator_name",
-        "destructor_name",
-    }:
-        return current
-    return None
-
-
-def declarator_name(element: SyntaxElement) -> str | None:
-    """返回 declarator 中实际名称的源码文本。
-    Return the terminal declarator name spelling when available.
-    """
-    name = declarator_name_element(element)
-    return None if name is None else name.text
-
-
 def declaration_type_text(node: SyntaxNode) -> str | None:
     """重建声明的源码级类型文本，同时排除名称和初始化器；没有名称时是 = 之前的全部文本。
     Reconstruct source-level type text without the name and the initializer; without a name it

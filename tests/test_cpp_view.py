@@ -70,17 +70,17 @@ def test_deleted_constructors_are_not_callable() -> None:
     assert _constructors(source, "C", public_only=True, callable_only=True) == [["int"]]
 
 
-def test_member_functions_give_access_and_deleted_or_defaulted() -> None:
+def test_member_functions_give_their_access_and_whether_deleted() -> None:
     source = (
         "class C { public: C(int); C& operator=(const C&) = delete; ~C() = default;\n"
         " private: void Run(); };"
     )
     functions = CppDocument.parse(source).class_views("C")[0].functions()
-    assert [(item.name, item.access, item.deleted, item.defaulted) for item in functions] == [
-        ("C", "public", False, False),
-        ("operator=", "public", True, False),
-        ("~C", "public", False, True),
-        ("Run", "private", False, False),
+    assert [(item.name, item.access, item.deleted) for item in functions] == [
+        ("C", "public", False),
+        ("operator=", "public", True),
+        ("~C", "public", False),
+        ("Run", "private", False),
     ]
 
 

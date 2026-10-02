@@ -41,10 +41,10 @@ def test_identifier_occurrences_skip_literals_comments_and_directives() -> None:
         'f(dev, obj.dev, ptr->dev, ns::dev, dev::constant, "dev"); // dev\n'
     )
     items = [item for item in identifier_occurrences(source) if item.text == "dev"]
-    assert [(item.qualified_left, item.scope_root) for item in items] == [
-        (False, False),
-        (True, False),
-        (True, False),
-        (True, False),
-        (False, True),
+    assert [(item.previous, item.following) for item in items] == [
+        ("(", ","),
+        (".", ","),
+        ("->", ","),
+        ("::", ","),
+        (",", "::"),
     ]

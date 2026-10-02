@@ -49,20 +49,6 @@ class CppIdentifierOccurrence:
     previous: str | None
     following: str | None
 
-    @property
-    def qualified_left(self) -> bool:
-        """判断 identifier 左侧是否通过成员或作用域运算符限定。
-        Return whether the identifier is qualified from the left.
-        """
-        return self.previous in (".", "->", ".*", "->*", "::")
-
-    @property
-    def scope_root(self) -> bool:
-        """判断 identifier 是否作为作用域限定符的根。
-        Return whether the identifier is followed by a scope-resolution operator.
-        """
-        return self.following == "::"
-
 
 # 宏参数和模板参数的逗号不能用 str.split(',')：只有所有括号/方括号/花括号
 # （以及可选模板尖括号）depth 都为 0 时，逗号才是当前列表的分隔符。
