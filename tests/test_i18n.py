@@ -15,9 +15,6 @@ from xr_syntax.i18n import _width, _wrap, chinese, localize_argparse, tr
 
 
 def test_the_first_set_variable_chooses_the_language(monkeypatch: pytest.MonkeyPatch) -> None:
-    """验证 XR_LANG 优先，其次依次是 LANGUAGE、LC_ALL、LC_MESSAGES、LANG。
-    Verify XR_LANG comes first, then LANGUAGE, LC_ALL, LC_MESSAGES and LANG in turn.
-    """
     for name in ("XR_LANG", "LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("LANG", "zh_CN.UTF-8")
@@ -32,9 +29,6 @@ def test_the_first_set_variable_chooses_the_language(monkeypatch: pytest.MonkeyP
 
 
 def test_library_messages_follow_the_language(monkeypatch: pytest.MonkeyPatch) -> None:
-    """验证 xr-syntax 的诊断信息按当前语言输出。
-    Verify xr-syntax diagnostics are written in the current language.
-    """
     with pytest.raises(ValueError, match="^unclosed block comment$"):
         code_tokens("/* open")
     monkeypatch.setenv("XR_LANG", "zh")
@@ -42,11 +36,9 @@ def test_library_messages_follow_the_language(monkeypatch: pytest.MonkeyPatch) -
         code_tokens("/* open")
 
 
-def test_argparse_texts_are_translated_in_chinese(monkeypatch: pytest.MonkeyPatch) -> None:
-    """验证中文环境下 argparse 的 usage、标题和参数错误是中文，英文环境下不变。
-    Verify argparse usage, titles and argument errors are Chinese in a Chinese environment and
-    unchanged in English.
-    """
+def test_argparse_texts_are_translated_in_chinese(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     localize_argparse()
     localize_argparse()
 
@@ -78,13 +70,12 @@ def test_argparse_texts_are_translated_in_chinese(monkeypatch: pytest.MonkeyPatc
     assert ("repeat（默认：1）" if translated else "repeat (default: 1)") in help_text
     with pytest.raises(SystemExit):
         parser().parse_args([])
+    assert capsys.readouterr().err == (
+        "用法：tool [-h] [--count COUNT] name\ntool：错误：缺少必需的参数：name\n"
+    )
 
 
 def test_wide_text_wraps_by_column_width() -> None:
-    """验证宽字符按 2 列计算、宽字符之间可以换行，以及避头尾。
-    Verify wide characters count as 2 columns, lines may break between them, and punctuation
-    stays off the wrong line ends.
-    """
     assert _wrap("甲乙丙丁", 4) == ["甲乙", "丙丁"]
     assert _wrap("甲，乙", 2) == ["甲，", "乙"]
     assert _wrap("乙（甲）丙", 6) == ["乙", "（甲）", "丙"]
@@ -92,10 +83,6 @@ def test_wide_text_wraps_by_column_width() -> None:
 
 
 def test_help_holding_chinese_wraps_by_column_width(monkeypatch: pytest.MonkeyPatch) -> None:
-    """验证含中文的帮助不超过列宽、不拆开网址，纯英文帮助仍由 textwrap 折行。
-    Verify help holding Chinese stays within the columns without splitting a URL, while
-    English help is still wrapped by textwrap.
-    """
     localize_argparse()
     monkeypatch.setenv("COLUMNS", "60")
     text = (
