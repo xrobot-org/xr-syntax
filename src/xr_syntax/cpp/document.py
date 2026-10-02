@@ -16,17 +16,16 @@ from xr_syntax.core import (
     SyntaxTree,
     encode_source,
 )
-
-from .invocation import (
+from xr_syntax.cpp.invocation import (
     CppIdentifierOccurrence,
     CppInvocationView,
-    _identifier_occurrences_of,
     find_invocations,
+    identifier_occurrences_of,
 )
-from .lexer import _Lexed, lex
-from .lexical import CppLexicalToken, _code_tokens_of
-from .parser import CppParser
-from .view import CppClassView, CppIncludeView
+from xr_syntax.cpp.lexer import Lexed, lex
+from xr_syntax.cpp.lexical import CppLexicalToken, code_tokens_of
+from xr_syntax.cpp.parser import CppParser, parse_with_lexing
+from xr_syntax.cpp.view import CppClassView, CppIncludeView
 
 # ---------------------------------------------------------------------------
 # 受保护源码区域
@@ -67,7 +66,7 @@ class CppDocument(SyntaxDocument):
         self,
         tree: SyntaxTree,
         parser: SyntaxParserProtocol,
-        lexed: _Lexed | None = None,
+        lexed: Lexed | None = None,
     ) -> None:
         """绑定语法树和解析器；lexed 是解析时的词法结果，没有时在首次用到时重新切分。
         Bind a syntax tree and parser; lexed is the lexing result of the parse, and without it
@@ -92,10 +91,10 @@ class CppDocument(SyntaxDocument):
         # A parser that overrides parse is called as usual; the source is lexed on first use.
         if type(selected).parse is not CppParser.parse:
             return cls(selected.parse(source, source_name=source_name), selected)
-        tree, lexed = selected._parse_lexed(source, source_name)
+        tree, lexed = parse_with_lexing(source, source_name)
         return cls(tree, selected, lexed)
 
-    def _lexing(self) -> _Lexed:
+    def _lexing(self) -> Lexed:
         """文档源码的词法结果（lexeme 和 lexer 诊断）。
         The lexing result (lexemes and lexer diagnostics) of the document's source.
         """
@@ -108,26 +107,26 @@ class CppDocument(SyntaxDocument):
         The same as code_tokens(document.render()), reusing the lexing of the parse.
 
         Raises:
-            ValueError: 源码有词法错误（未闭合的注释或字面量）。
-                The source has a lexical error (an unclosed comment or literal).
+            ValueError: 源码有词法错误（未闭合的块注释或原始字符串）。
+                The source has a lexical error (an unclosed block comment or raw string).
         """
         lexed = self._lexing()
         if lexed.diagnostics:
             raise ValueError(lexed.diagnostics[0].message)
-        return _code_tokens_of(lexed)
+        return code_tokens_of(lexed)
 
     def identifier_occurrences(self) -> tuple[CppIdentifierOccurrence, ...]:
         """与 identifier_occurrences(document.render()) 相同，复用解析时的词法结果。
         The same as identifier_occurrences(document.render()), reusing the lexing of the parse.
 
         Raises:
-            ValueError: 源码有词法错误（未闭合的注释或字面量）。
-                The source has a lexical error (an unclosed comment or literal).
+            ValueError: 源码有词法错误（未闭合的块注释或原始字符串）。
+                The source has a lexical error (an unclosed block comment or raw string).
         """
         lexed = self._lexing()
         if lexed.diagnostics:
             raise ValueError(lexed.diagnostics[0].message)
-        return _identifier_occurrences_of(lexed)
+        return identifier_occurrences_of(lexed)
 
     def replace_region_body(self, region: CppRegion, body: str) -> CppDocument:
         """替换当前文档中一个已验证区域的 body。

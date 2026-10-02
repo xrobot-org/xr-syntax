@@ -7,8 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from xr_syntax.core import SyntaxElement, SyntaxNode
-
-from .syntax_utils import (
+from xr_syntax.cpp.syntax_utils import (
     declaration_name,
     declaration_type_text,
     field_text,

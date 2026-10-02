@@ -4,10 +4,10 @@ Internal helpers shared by C++ lexical-query modules.
 
 from __future__ import annotations
 
-from .lexer import _Lexed
+from xr_syntax.cpp.lexer import Lexed
 
 
-def _preprocessor_mask(lexed: _Lexed) -> list[bool]:
+def preprocessor_mask(lexed: Lexed) -> list[bool]:
     """每个 lexeme 是否位于预处理逻辑行（从 # 开始，含反斜杠续行）。
     Whether each lexeme belongs to a preprocessor logical line (from a # on, continuation
     lines included).

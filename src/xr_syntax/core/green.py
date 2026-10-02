@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from functools import cached_property
 from typing import Union
 
-from .text import encode_source
+from xr_syntax.core.text import encode_source
 
 # ---------------------------------------------------------------------------
 # 不可变 green 存储层
@@ -155,7 +155,7 @@ class GreenNode(_GreenMixin):
 _new = object.__new__
 
 
-def _token(kind: str, text: str, named: bool) -> GreenToken:
+def green_token(kind: str, text: str, named: bool) -> GreenToken:
     """与 GreenToken(kind, text, named=named) 相等的 token。
     A token equal to GreenToken(kind, text, named=named).
     """
@@ -169,7 +169,7 @@ def _token(kind: str, text: str, named: bool) -> GreenToken:
     return element
 
 
-def _trivia(kind: str, text: str) -> GreenTrivia:
+def green_trivia(kind: str, text: str) -> GreenTrivia:
     """与 GreenTrivia(kind, text) 相等的 trivia。
     A trivia equal to GreenTrivia(kind, text).
     """
@@ -180,7 +180,7 @@ def _trivia(kind: str, text: str) -> GreenTrivia:
     return element
 
 
-def _child(element: GreenElement, field: str | None = None) -> GreenChild:
+def green_child(element: GreenElement, field: str | None = None) -> GreenChild:
     """与 GreenChild(element, field) 相等的边。
     An edge equal to GreenChild(element, field).
     """
@@ -191,7 +191,9 @@ def _child(element: GreenElement, field: str | None = None) -> GreenChild:
     return child
 
 
-def _node(kind: str, children: tuple[GreenChild, ...], byte_width: int | None = None) -> GreenNode:
+def green_node(
+    kind: str, children: tuple[GreenChild, ...], byte_width: int | None = None
+) -> GreenNode:
     """与 GreenNode(kind, children, named=True) 相等的节点；给出 byte_width 时不再从 children 求和。
     A node equal to GreenNode(kind, children, named=True); with byte_width given it is not summed
     from the children.

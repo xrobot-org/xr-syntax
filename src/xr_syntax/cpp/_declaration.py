@@ -5,11 +5,10 @@ Internal C++ parser stages for declaration units, functions, and parameters.
 from __future__ import annotations
 
 from xr_syntax.core import GreenElement, GreenNode
-from xr_syntax.core.green import _token
-
-from ._declarator import _TYPE_KEYWORDS
-from ._support import _ParserSupport, _Replacement
-from .lexer import _CONTROL, _STORAGE, _TYPE_WORDS
+from xr_syntax.core.green import green_token
+from xr_syntax.cpp._declarator import TYPE_KEYWORDS
+from xr_syntax.cpp._support import ParserSupport, Replacement
+from xr_syntax.cpp.lexer import CONTROL, STORAGE, TYPE_WORDS
 
 # 函数声明子 ) 之后仍属于 declarator 的修饰词。
 # Words after the ) of a function declarator that still belong to the declarator.
@@ -17,16 +16,16 @@ _DECLARATOR_SUFFIXES = frozenset({"const", "volatile", "noexcept", "override", "
 # 构造函数成员初始化列表的 : 之前的记号：参数列表的 )、noexcept 和函数 try 块的 try。
 # The tokens before the : of a constructor's member initializer list: the ) of the parameter
 # list, noexcept, and the try of a function try block.
-_BEFORE_INITIALIZERS = frozenset({")", "noexcept", "try"})
+BEFORE_INITIALIZERS = frozenset({")", "noexcept", "try"})
 _UNIT_CONTEXTS = frozenset({"top", "class", "block"})
 
 
-class _DeclarationMixin(_ParserSupport):
+class DeclarationMixin(ParserSupport):
     """把单元区间分类成声明、函数或语句，并解析参数列表。
     Classify unit ranges as declarations, functions, or statements and parse parameter lists.
     """
 
-    def _parse_unit(self, start: int, end: int, *, context: str) -> _Replacement | None:
+    def _parse_unit(self, start: int, end: int, *, context: str) -> Replacement | None:
         """把一个完整声明/语句区间分类成具体结构节点。
         Classify one complete declaration/statement range into a concrete structural node.
         """
@@ -37,7 +36,7 @@ class _DeclarationMixin(_ParserSupport):
 
         if first == "return":
             return self._parse_return(start, end)
-        if first in _CONTROL:
+        if first in CONTROL:
             return self._parse_control(start, end, first)
         if first == "do":
             return self._parse_do(start, end)
@@ -53,7 +52,7 @@ class _DeclarationMixin(_ParserSupport):
         if (first == "case" or first == "default") and self._stext[high - 1] == ":":
             # 标签之后的语句是同级的下一个节点。
             # The statement after the label is the next sibling node.
-            replacements: list[_Replacement] = []
+            replacements: list[Replacement] = []
             if first == "case":
                 value = self._expression_replacement(
                     self._sig[low + 1], self._sig[high - 1], "value"
@@ -97,7 +96,7 @@ class _DeclarationMixin(_ParserSupport):
         )
         return (start, end, node, None)
 
-    def _parse_function(self, start: int, end: int, *, context: str) -> _Replacement | None:
+    def _parse_function(self, start: int, end: int, *, context: str) -> Replacement | None:
         """识别函数定义/声明，并构造 function_declarator 与参数结构。
         Recognize a function declaration/definition and build its function_declarator and parameter structure.
         """
@@ -139,7 +138,7 @@ class _DeclarationMixin(_ParserSupport):
             ],
         )
 
-        replacements: list[_Replacement] = [
+        replacements: list[Replacement] = [
             (name_start, declarator_end, function_declarator, "declarator")
         ]
         type_range = self._type_range(start, name_start)
@@ -192,7 +191,7 @@ class _DeclarationMixin(_ParserSupport):
             if text == "(" or text == "[":
                 position = self._skip_group(position, high)
                 continue
-            if text == ":" and stext[position - 1] in _BEFORE_INITIALIZERS:
+            if text == ":" and stext[position - 1] in BEFORE_INITIALIZERS:
                 initializers = True
             elif text == "=" or text == ";":
                 return None
@@ -203,7 +202,7 @@ class _DeclarationMixin(_ParserSupport):
         """解析函数参数列表并保留逗号与空白。
         Parse a function parameter list while preserving commas and whitespace.
         """
-        replacements: list[_Replacement] = []
+        replacements: list[Replacement] = []
         # 参数类型中的模板实参含有逗号（std::pair<int, float> p），尖括号按嵌套处理。
         # Template arguments in parameter types contain commas (std::pair<int, float> p), so
         # angle brackets nest.
@@ -228,11 +227,11 @@ class _DeclarationMixin(_ParserSupport):
             start, equal if equal is not None else end, template=template
         )
         first = stext[low] if low < high else ""
-        replacements: list[_Replacement] = []
+        replacements: list[Replacement] = []
         if name is not None:
             text = self._texts[name]
-            name_kind = "type_identifier" if template and text not in _TYPE_WORDS else "identifier"
-            replacements.append((name, name + 1, _token(name_kind, text, True), "declarator"))
+            name_kind = "type_identifier" if template and text not in TYPE_WORDS else "identifier"
+            replacements.append((name, name + 1, green_token(name_kind, text, True), "declarator"))
         if equal is not None:
             value_start = self._next_significant(equal + 1, end)
             if value_start is not None:
@@ -263,9 +262,7 @@ class _DeclarationMixin(_ParserSupport):
             )
         return self._compose(kind, start, end, replacements)
 
-    def _parse_type_declaration(
-        self, start: int, end: int, content_end: int
-    ) -> _Replacement | None:
+    def _parse_type_declaration(self, start: int, end: int, content_end: int) -> Replacement | None:
         """只声明类型、没有声明子的声明，例如 enum { A = 1 };；其他情况返回 None。
         A declaration of a type alone without a declarator, such as enum { A = 1 };; None
         otherwise.
@@ -273,13 +270,13 @@ class _DeclarationMixin(_ParserSupport):
         stext = self._stext
         low, high = self._span(start, content_end)
         position = low
-        while position < high and stext[position] in _STORAGE:
+        while position < high and stext[position] in STORAGE:
             position += 1
-        if position >= high or stext[position] not in _TYPE_KEYWORDS or stext[high - 1] != "}":
+        if position >= high or stext[position] not in TYPE_KEYWORDS or stext[high - 1] != "}":
             return None
         type_start = self._sig[position]
         type_end = self._sig[high - 1] + 1
-        replacements: list[_Replacement] = [
+        replacements: list[Replacement] = [
             (
                 type_start,
                 type_end,
@@ -290,7 +287,7 @@ class _DeclarationMixin(_ParserSupport):
         replacements.extend(self._specifier_replacements(start, type_start))
         return (start, end, self._compose("declaration", start, end, replacements), None)
 
-    def _parse_declaration(self, start: int, end: int) -> _Replacement | None:
+    def _parse_declaration(self, start: int, end: int) -> Replacement | None:
         """解析常见变量声明；无法稳定拆分时返回 None 让上层保留原文。
         Parse common variable declarations; return None when a stable split is not possible so the caller preserves the original source.
         """
@@ -304,7 +301,7 @@ class _DeclarationMixin(_ParserSupport):
 
         texts = self._texts
         type_start = self._next_significant(start, name)
-        while type_start is not None and texts[type_start] in _STORAGE:
+        while type_start is not None and texts[type_start] in STORAGE:
             type_start = self._next_significant(type_start + 1, name)
         if type_start is None:
             return None
@@ -352,7 +349,7 @@ class _DeclarationMixin(_ParserSupport):
             if name_start == name
             else self._compose("qualified_identifier", name_start, name + 1, [])
         )
-        declarator_replacements: list[_Replacement] = [
+        declarator_replacements: list[Replacement] = [
             (name_start, name + 1, name_element, "declarator")
         ]
         if value_start is not None:
@@ -367,7 +364,7 @@ class _DeclarationMixin(_ParserSupport):
         if type_last is None:
             return None
         type_node = self._compose("type_descriptor", type_start, type_last + 1, [])
-        replacements: list[_Replacement] = [
+        replacements: list[Replacement] = [
             (type_start, type_last + 1, type_node, "type"),
             (type_end, content_end, declarator, "declarator"),
         ]

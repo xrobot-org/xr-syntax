@@ -9,10 +9,9 @@ from dataclasses import dataclass
 from itertools import accumulate
 
 from xr_syntax.core import SourceSpan
+from xr_syntax.cpp._lexical_support import preprocessor_mask
+from xr_syntax.cpp.lexer import LITERAL_KINDS, Lexed, lex
 from xr_syntax.i18n import tr
-
-from ._lexical_support import _preprocessor_mask
-from .lexer import _LITERAL_KINDS, _Lexed, lex
 
 
 @dataclass(frozen=True)
@@ -35,14 +34,14 @@ def code_tokens(source: str) -> tuple[CppLexicalToken, ...]:
     lexed = lex(source)
     if lexed.diagnostics:
         raise ValueError(lexed.diagnostics[0].message)
-    return _code_tokens_of(lexed)
+    return code_tokens_of(lexed)
 
 
-def _code_tokens_of(lexed: _Lexed) -> tuple[CppLexicalToken, ...]:
+def code_tokens_of(lexed: Lexed) -> tuple[CppLexicalToken, ...]:
     """由词法结果得到代码 token；字符位置由各 lexeme 的文本长度累加得出。
     The code tokens of a lexing result; character positions add up the lexemes' text lengths.
     """
-    directives = _preprocessor_mask(lexed)
+    directives = preprocessor_mask(lexed)
     texts = lexed.texts
     offsets = lexed.offsets
     characters = list(accumulate(map(len, texts), initial=0))
@@ -108,6 +107,6 @@ def _public_kind(kind: str) -> str:
         return "identifier"
     if kind == "number_literal":
         return "number"
-    if kind in _LITERAL_KINDS:
+    if kind in LITERAL_KINDS:
         return "literal"
     return "punct"

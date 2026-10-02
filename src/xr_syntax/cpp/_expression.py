@@ -5,11 +5,10 @@ Internal C++ parser implementation for statements and expression structure.
 from __future__ import annotations
 
 from xr_syntax.core import GreenElement, GreenNode
-from xr_syntax.core.green import _token
-
-from ._ranges import _BRACKETS, _deduplicate_replacements, _empty_expression
-from ._support import _ParserSupport, _Replacement
-from .lexer import _BINARY_PRECEDENCE, _LITERAL_KINDS
+from xr_syntax.core.green import green_token
+from xr_syntax.cpp._ranges import BRACKETS, deduplicate_replacements, empty_expression
+from xr_syntax.cpp._support import ParserSupport, Replacement
+from xr_syntax.cpp.lexer import BINARY_PRECEDENCE, LITERAL_KINDS
 
 # 出现在表达式开头或这些 token 之后的 + - * & 是一元运算符。
 # + - * & at the start of an expression or after these tokens are unary operators.
@@ -19,7 +18,7 @@ _COMPARISONS_ENDING_IN_EQUAL = frozenset({"==", "!=", "<=", ">="})
 # 二元运算符 token 按文本共享：kind 就是运算符文本（and/or/xor 也一样），不是 named。
 # Binary operator tokens are shared by text: the kind is the operator text (and/or/xor too) and
 # they are not named.
-_OPERATOR_TOKENS = {text: _token(text, text, False) for text in _BINARY_PRECEDENCE}
+_OPERATOR_TOKENS = {text: green_token(text, text, False) for text in BINARY_PRECEDENCE}
 _CONTROL_KINDS = {
     "if": "if_statement",
     "for": "for_statement",
@@ -34,7 +33,7 @@ _MEMBER_ACCESS = ("::", ".", "->")
 # source_expression，并继续尽量识别内部不重叠调用，避免“猜错 AST”。
 # This layer only refines structures it can classify reliably; anything else stays a
 # source_expression, and calls inside it that do not overlap are still recognized.
-class _ExpressionMixin(_ParserSupport):
+class ExpressionMixin(ParserSupport):
     """解析 compound statement、控制流、调用和常见表达式结构。
     Parse compound statements, control flow, calls, and common expression structures.
     """
@@ -44,7 +43,7 @@ class _ExpressionMixin(_ParserSupport):
         start: int,
         end: int,
         field: str | None = None,
-    ) -> _Replacement | None:
+    ) -> Replacement | None:
         """构造与 expression 实际覆盖范围严格一致的 replacement。
         Create an expression replacement whose span exactly matches the trivia-trimmed expression node.
         """
@@ -60,26 +59,26 @@ class _ExpressionMixin(_ParserSupport):
         replacements = self._parse_scope(open_brace + 1, close_brace, context="block")
         return self._compose("compound_statement", open_brace, close_brace + 1, replacements)
 
-    def _parse_return(self, start: int, end: int) -> _Replacement:
+    def _parse_return(self, start: int, end: int) -> Replacement:
         """解析 return 语句及返回表达式。
         Parse a return statement together with its returned expression.
         """
         low, high = self._span(start, end)
         semicolon = self._sig[high - 1] if self._stext[high - 1] == ";" else end
         expression_start = self._next_significant(self._sig[low] + 1, semicolon)
-        replacements: list[_Replacement] = []
+        replacements: list[Replacement] = []
         if expression_start is not None:
             replacement = self._expression_replacement(expression_start, semicolon)
             if replacement is not None:
                 replacements.append(replacement)
         return (start, end, self._compose("return_statement", start, end, replacements), None)
 
-    def _parse_control(self, start: int, end: int, keyword: str) -> _Replacement:
+    def _parse_control(self, start: int, end: int, keyword: str) -> Replacement:
         """解析 if/for/while/switch/catch 的条件和复合 body。
         Parse the condition and compound body of if/for/while/switch/catch constructs.
         """
         low, high = self._span(start, end)
-        replacements: list[_Replacement] = []
+        replacements: list[Replacement] = []
         cursor = start + 1
         try:
             open_paren: int | None = self._sig[self._stext.index("(", low + 1, high)]
@@ -106,11 +105,11 @@ class _ExpressionMixin(_ParserSupport):
         node = self._compose(_CONTROL_KINDS[keyword], start, end, replacements)
         return (start, end, node, None)
 
-    def _parse_do(self, start: int, end: int) -> _Replacement:
+    def _parse_do(self, start: int, end: int) -> Replacement:
         """解析 do/while 结构；body 内部仍递归解析。
         Parse a do/while construct while recursively structuring its body.
         """
-        replacements: list[_Replacement] = []
+        replacements: list[Replacement] = []
         body_open = self._next_significant(start + 1, end)
         if body_open is not None and self._texts[body_open] == "{" and body_open in self._pairs:
             body_close = self._pairs[body_open]
@@ -118,12 +117,12 @@ class _ExpressionMixin(_ParserSupport):
             replacements.append((body_open, body_close + 1, body, "body"))
         return (start, end, self._compose("do_statement", start, end, replacements), None)
 
-    def _parse_concept(self, start: int, end: int) -> _Replacement:
+    def _parse_concept(self, start: int, end: int) -> Replacement:
         """解析 concept 定义，并继续解析等号后的表达式。
         Parse a concept definition and continue parsing the expression after =.
         """
         equal = self._find_top_level_token(start, end, "=")
-        replacements: list[_Replacement] = []
+        replacements: list[Replacement] = []
         if equal is not None:
             value_end = self._before_trailing_semicolon(start, end)
             value_start = self._next_significant(equal + 1, value_end)
@@ -150,7 +149,7 @@ class _ExpressionMixin(_ParserSupport):
         """
         low, high = self._span(start, end)
         if low >= high:
-            return _empty_expression()
+            return empty_expression()
         start = self._sig[low]
         end = self._sig[high - 1] + 1
         if not self._enter(start, end):
@@ -202,7 +201,7 @@ class _ExpressionMixin(_ParserSupport):
                 )
         if first_text == "requires":
             body_open = self._first_paired(low, high, "{")
-            replacements: list[_Replacement] = []
+            replacements: list[Replacement] = []
             if body_open is not None and pairs[body_open] < end:
                 body_close = pairs[body_open]
                 body = self._parse_compound(body_open, body_close)
@@ -254,7 +253,7 @@ class _ExpressionMixin(_ParserSupport):
         position = low
         while position < high:
             text = stext[position]
-            if text in _BRACKETS:
+            if text in BRACKETS:
                 if text in "([{" and not (round_depth or square_depth or brace_depth):
                     skipped = self._skip_group(position, high)
                     if skipped != position + 1:
@@ -273,12 +272,12 @@ class _ExpressionMixin(_ParserSupport):
                 else:
                     brace_depth = max(0, brace_depth - 1)
             elif not (round_depth or square_depth or brace_depth):
-                precedence = _BINARY_PRECEDENCE.get(text)
+                precedence = BINARY_PRECEDENCE.get(text)
                 if precedence is not None and not (
                     text in _UNARY_CAPABLE
                     and (
                         position == low
-                        or stext[position - 1] in _BINARY_PRECEDENCE
+                        or stext[position - 1] in BINARY_PRECEDENCE
                         or stext[position - 1] in _OPERAND_OPENERS
                     )
                 ):
@@ -302,7 +301,7 @@ class _ExpressionMixin(_ParserSupport):
         """
         minimum = min(precedence for precedence, _ in operators)
         chain = [index for index, (precedence, _) in enumerate(operators) if precedence == minimum]
-        if minimum == _BINARY_PRECEDENCE["="]:
+        if minimum == BINARY_PRECEDENCE["="]:
             return self._assignment_chain(start, end, low, high, operators, chain)
         return self._left_chain(start, end, low, high, operators, chain)
 
@@ -473,7 +472,7 @@ class _ExpressionMixin(_ParserSupport):
         if high - low == 1:
             index = self._sig[low]
             kind = self._infos[index][0]
-            if kind == "identifier" or kind in _LITERAL_KINDS:
+            if kind == "identifier" or kind in LITERAL_KINDS:
                 return self._plain[index].element
 
         # 最后保守 fallback：整体仍是 source_expression，但把其中可以确定
@@ -500,7 +499,7 @@ class _ExpressionMixin(_ParserSupport):
         """解析调用实参列表，使每个实参都可单独查询/重写。
         Parse a call argument list so each argument can be queried or rewritten independently.
         """
-        replacements: list[_Replacement] = []
+        replacements: list[Replacement] = []
         for part_start, part_end in self._split_top_level(open_paren + 1, close_paren, ","):
             trimmed = self._trim(part_start, part_end)
             if trimmed is not None:
@@ -508,7 +507,7 @@ class _ExpressionMixin(_ParserSupport):
                 replacements.append((trimmed[0], trimmed[1], argument, None))
         return self._compose("argument_list", open_paren, close_paren + 1, replacements)
 
-    def _scan_nested_calls(self, start: int, end: int) -> list[_Replacement]:
+    def _scan_nested_calls(self, start: int, end: int) -> list[Replacement]:
         """在未完整分类的表达式中保守识别不重叠的调用。
         Conservatively recognize non-overlapping calls inside an expression that remains otherwise generic.
 
@@ -538,8 +537,8 @@ class _ExpressionMixin(_ParserSupport):
                         callee -= 2
                     candidates.append((sig[callee], close + 1))
             position += 1
-        result: list[_Replacement] = []
-        for call_start, call_end in _deduplicate_replacements(candidates):
+        result: list[Replacement] = []
+        for call_start, call_end in deduplicate_replacements(candidates):
             result.append(
                 (call_start, call_end, self._parse_expression(call_start, call_end), None)
             )

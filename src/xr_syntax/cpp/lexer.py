@@ -11,7 +11,7 @@ from itertools import accumulate
 from typing import NamedTuple
 
 from xr_syntax.core import Diagnostic, GreenChild, GreenElement, SourcePoint, SourceSpan
-from xr_syntax.core.green import _child, _token, _trivia
+from xr_syntax.core.green import green_child, green_token, green_trivia
 from xr_syntax.i18n import tr
 
 # C++ punctuator 采用最长匹配；同时关闭模板实参列表和 template 参数列表的 >> 随后拆成两个 >。
@@ -137,10 +137,10 @@ _IDENTIFIER_TAIL_PATTERN = re.compile(_IDENTIFIER_TAIL)
 _LINE_BREAK = re.compile(rb"\r\n?|\n")
 _WORD_LITERALS = {"true", "false", "nullptr"}
 
-_STORAGE = {"static", "extern", "thread_local", "mutable", "register"}
-_QUALIFIERS = {"const", "volatile", "restrict", "__restrict", "__restrict__"}
-_CONTROL = {"if", "for", "while", "switch", "catch"}
-_TYPE_WORDS = {
+STORAGE = {"static", "extern", "thread_local", "mutable", "register"}
+QUALIFIERS = {"const", "volatile", "restrict", "__restrict", "__restrict__"}
+CONTROL = {"if", "for", "while", "switch", "catch"}
+TYPE_WORDS = {
     "auto",
     "bool",
     "char",
@@ -161,7 +161,7 @@ _TYPE_WORDS = {
     "struct",
     "enum",
 }
-_LITERAL_KINDS = {
+LITERAL_KINDS = {
     "number_literal",
     "string_literal",
     "char_literal",
@@ -173,7 +173,7 @@ _LITERAL_KINDS = {
 
 # Pratt parser 的二元运算符优先级；数值越小，绑定越弱。
 # Pratt-parser binary precedence; smaller values bind more weakly.
-_BINARY_PRECEDENCE = {
+BINARY_PRECEDENCE = {
     "=": 1,
     "+=": 1,
     "-=": 1,
@@ -301,7 +301,7 @@ class _PlainEdges(dict[str, GreenChild]):
         """为一个新文本创建叶子和边，短文本留在缓存里。
         Create the leaf and edge for a new text and keep them when the text is short.
         """
-        edge = _child(_leaf(text, _INFOS[text]))
+        edge = green_child(_leaf(text, _INFOS[text]))
         if len(text) <= _CACHED_LENGTH:
             self[text] = edge
         return edge
@@ -334,7 +334,7 @@ def _leaf(text: str, info: _Info) -> GreenElement:
     Build the green token or trivia for a text and its (kind, named, trivia).
     """
     kind, named, trivia = info
-    return _trivia(kind, text) if trivia else _token(kind, text, named)
+    return green_trivia(kind, text) if trivia else green_token(kind, text, named)
 
 
 def _byte_width(text: str) -> int:
@@ -344,7 +344,7 @@ def _byte_width(text: str) -> int:
     return len(text) if text.isascii() else len(text.encode("utf-8", errors="surrogateescape"))
 
 
-class _Lexeme(NamedTuple):
+class Lexeme(NamedTuple):
     """保存一个不可再分的源码片段及其字节位置。
     Store one indivisible source fragment together with its byte positions.
     """
@@ -361,11 +361,11 @@ class _Lexeme(NamedTuple):
         Convert the lexical element into its green token/trivia representation.
         """
         if self.trivia:
-            return _trivia(self.kind, self.text)
-        return _token(self.kind, self.text, self.named)
+            return green_trivia(self.kind, self.text)
+        return green_token(self.kind, self.text, self.named)
 
 
-class _Lexed:
+class Lexed:
     """一次词法扫描的结果：按 lexeme 顺序排列的并列数组，外加词法诊断。
     The result of one lexing pass: parallel arrays in lexeme order plus the lexer diagnostics.
 
@@ -407,7 +407,7 @@ class _Lexed:
         self.offsets = offsets
         self.special = special
         self.diagnostics: list[Diagnostic] = []
-        self._lexemes: list[_Lexeme] | None = None
+        self._lexemes: list[Lexeme] | None = None
         self._line_starts: list[int] | None = None
 
     def diagnostic(self, message: str, span: SourceSpan) -> Diagnostic:
@@ -437,7 +437,7 @@ class _Lexed:
         """
         plain = list(map(_PLAIN_EDGES.__getitem__, self.texts))
         for index in self.special:
-            plain[index] = _child(_leaf(self.texts[index], self.infos[index]))
+            plain[index] = green_child(_leaf(self.texts[index], self.infos[index]))
         return plain
 
     def significance(self) -> list[bool]:
@@ -450,20 +450,20 @@ class _Lexed:
             significant[index] = not trivia and kind != "comment"
         return significant
 
-    def lexemes(self) -> list[_Lexeme]:
+    def lexemes(self) -> list[Lexeme]:
         """逐个 lexeme 的对象形式，首次使用时创建。
         The lexemes as objects, created on first use.
         """
         if self._lexemes is None:
             offsets = self.offsets
             self._lexemes = [
-                _Lexeme(info[0], text, offsets[index], offsets[index + 1], info[1], info[2])
+                Lexeme(info[0], text, offsets[index], offsets[index + 1], info[1], info[2])
                 for index, (text, info) in enumerate(zip(self.texts, self.infos, strict=True))
             ]
         return self._lexemes
 
 
-def lex(text: str) -> _Lexed:
+def lex(text: str) -> Lexed:
     """把源码切成无损 lexeme 序列；对不认识的字符保守地生成 raw lexeme。
     Split source text into a lossless lexeme sequence; unknown characters become raw lexemes.
     """
@@ -495,7 +495,7 @@ def lex(text: str) -> _Lexed:
         message = _unclosed(texts[-1], infos[-1])
         if message is not None:
             messages.append(message)
-    lexed = _Lexed(texts, infos, offsets, special)
+    lexed = Lexed(texts, infos, offsets, special)
     lexed.diagnostics = [
         lexed.diagnostic(message, SourceSpan(offsets[-2], offsets[-1])) for message in messages
     ]

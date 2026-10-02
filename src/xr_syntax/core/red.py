@@ -8,11 +8,11 @@ from collections.abc import Iterator
 from collections.abc import Set as AbstractSet
 from typing import TYPE_CHECKING
 
-from .green import GreenChild, GreenElement, GreenNode, GreenToken, GreenTrivia
-from .span import SourceSpan
+from xr_syntax.core.green import GreenChild, GreenElement, GreenNode, GreenToken, GreenTrivia
+from xr_syntax.core.span import SourceSpan
 
 if TYPE_CHECKING:
-    from .tree import SyntaxTree
+    from xr_syntax.core.tree import SyntaxTree
 
 
 # ---------------------------------------------------------------------------

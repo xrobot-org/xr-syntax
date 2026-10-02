@@ -14,15 +14,14 @@ from xr_syntax.core import (
     decode_source,
     encode_source,
 )
-from xr_syntax.core.green import _token
+from xr_syntax.core.green import green_token
+from xr_syntax.cpp._declaration import BEFORE_INITIALIZERS, DeclarationMixin
+from xr_syntax.cpp._declarator import ATTRIBUTE_WORDS, TYPE_KEYWORDS, DeclaratorMixin
+from xr_syntax.cpp._expression import ExpressionMixin
+from xr_syntax.cpp._ranges import RangeMixin, deduplicate_replacements
+from xr_syntax.cpp._support import Replacement
+from xr_syntax.cpp.lexer import CONTROL, Lexed, lex
 from xr_syntax.i18n import tr
-
-from ._declaration import _BEFORE_INITIALIZERS, _DeclarationMixin
-from ._declarator import _ATTRIBUTE_WORDS, _TYPE_KEYWORDS, _DeclaratorMixin
-from ._expression import _ExpressionMixin
-from ._ranges import _deduplicate_replacements, _RangeMixin
-from ._support import _Replacement
-from .lexer import _CONTROL, _Lexed, lex
 
 _CLASS_KEYWORDS = frozenset({"class", "struct", "union"})
 _ACCESS_KEYWORDS = frozenset({"public", "private", "protected"})
@@ -38,10 +37,10 @@ _PREPROCESSOR_KINDS = {
     "ifdef": "preproc_ifdef",
     "ifndef": "preproc_ifdef",
 }
-_CONTROL_OR_DO = frozenset(_CONTROL | {"do"})
+_CONTROL_OR_DO = frozenset(CONTROL | {"do"})
 # _find_unit_end 关心的记号；其他记号直接跳过。
 # The tokens _find_unit_end looks at; other tokens are skipped.
-_UNIT_TOKENS = frozenset({"(", ")", "[", "]", ";", "{", ":"} | _TYPE_KEYWORDS)
+_UNIT_TOKENS = frozenset({"(", ")", "[", "]", ";", "{", ":"} | TYPE_KEYWORDS)
 _OPENING_DELIMITERS = {"(": ")", "[": "]", "{": "}"}
 _CLOSING_DELIMITERS = {")": "(", "]": "[", "}": "{"}
 
@@ -69,43 +68,41 @@ class CppParser:
         """解析源码并保证结果可逐字节还原。
         Parse source text or bytes into the corresponding immutable syntax representation.
         """
-        return self._parse_lexed(source, source_name)[0]
+        return parse_with_lexing(source, source_name)[0]
 
-    def _parse_lexed(
-        self, source: str | bytes, source_name: str | None
-    ) -> tuple[SyntaxTree, _Lexed]:
-        """解析源码，同时返回词法结果，供文档复用。
-        Parse source and also return the lexing result for the document to reuse.
-        """
-        data = encode_source(source) if isinstance(source, str) else bytes(source)
-        # Lexer 负责 source-preserving lexeme 与基础诊断；StructuralParser
-        # 只在 lexeme 范围上建立结构，不再重新切原始字符串。
-        # The lexer produces source-preserving lexemes and basic diagnostics; the structural
-        # parser only builds structure over lexeme ranges and never re-splits the source text.
-        lexed = lex(decode_source(data))
-        parser = _StructuralParser(lexed)
-        root = parser.parse_translation_unit()
-        tree = SyntaxTree("cpp", root, tuple(parser.diagnostics), source_name)
-        if tree.render_bytes() != data:
-            raise AssertionError(
-                tr(
-                    "the C++ parser did not reproduce the source byte for byte",
-                    "C++ 解析结果没有逐字节还原源码",
-                )
+
+def parse_with_lexing(source: str | bytes, source_name: str | None) -> tuple[SyntaxTree, Lexed]:
+    """解析源码，同时返回词法结果，供文档复用。
+    Parse source and also return the lexing result for the document to reuse.
+    """
+    data = encode_source(source) if isinstance(source, str) else bytes(source)
+    # 词法器给出保持源码的 lexeme 和基础诊断；结构解析只在 lexeme 区间上建立结构，不再切分源码。
+    # The lexer produces source-preserving lexemes and basic diagnostics; the structural parser
+    # only builds structure over lexeme ranges and never re-splits the source text.
+    lexed = lex(decode_source(data))
+    parser = _StructuralParser(lexed)
+    root = parser.parse_translation_unit()
+    tree = SyntaxTree("cpp", root, tuple(parser.diagnostics), source_name)
+    if tree.render_bytes() != data:
+        raise AssertionError(
+            tr(
+                "the C++ parser did not reproduce the source byte for byte",
+                "C++ 解析结果没有逐字节还原源码",
             )
-        return tree, lexed
+        )
+    return tree, lexed
 
 
 # 结构层拆成 declaration / declarator / expression / range 四个 mixin；
 # 这里仅负责阶段调度和 translation-unit 级控制流，避免单文件变成巨型 parser。
 # The structural layer is split into the declaration / declarator / expression / range mixins;
 # this class only schedules the stages and handles translation-unit level control flow.
-class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _RangeMixin):
+class _StructuralParser(DeclarationMixin, ExpressionMixin, DeclaratorMixin, RangeMixin):
     """组合声明、declarator、表达式和区间解析阶段，构成原生 C++ 结构 parser。
     Combine declaration, declarator, expression, and range parsing stages into the native C++ structural parser.
     """
 
-    def __init__(self, lexed: _Lexed) -> None:
+    def __init__(self, lexed: Lexed) -> None:
         """建立有效 lexeme 数组、位置表、叶子边和括号配对表。
         Build the significant-lexeme arrays, the position table, the leaf edges and the
         delimiter-pair tables.
@@ -201,14 +198,14 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
             )
         return False
 
-    def _parse_scope(self, start: int, end: int, *, context: str) -> list[_Replacement]:
+    def _parse_scope(self, start: int, end: int, *, context: str) -> list[Replacement]:
         """按顶层语句/声明边界解析一个连续作用域。
         Parse one continuous scope using top-level statement/declaration boundaries.
         """
         if not self._enter(start, end):
             return []
-        result: list[_Replacement] = []
-        replacement: _Replacement | None
+        result: list[Replacement] = []
+        replacement: Replacement | None
         texts = self._texts
         cursor = start
         while True:
@@ -275,7 +272,7 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
                 result.append(replacement)
             cursor = unit_end
         self._depth -= 1
-        return _deduplicate_replacements(result)
+        return deduplicate_replacements(result)
 
     def _find_unit_end(self, start: int, end: int, *, context: str) -> int:
         """从当前 unit 起点向后扫描到顶层声明/语句边界。
@@ -308,7 +305,7 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
             if text not in _UNIT_TOKENS:
                 position += 1
                 continue
-            if text in _TYPE_KEYWORDS:
+            if text in TYPE_KEYWORDS:
                 # typedef struct {...} Name; 中，类型关键字之后、参数列表之前的 { 是类型体。
                 # In typedef struct {...} Name;, a { after a type keyword and before any
                 # parameter list is a type body.
@@ -322,7 +319,7 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
                 if (
                     not (depth_round or depth_square)
                     and position > low
-                    and stext[position - 1] in _BEFORE_INITIALIZERS
+                    and stext[position - 1] in BEFORE_INITIALIZERS
                 ):
                     initializers = True
                 position += 1
@@ -340,7 +337,7 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
                 continue
             if text == "(" or text == "[":
                 if not (depth_round or depth_square):
-                    if text == "(" and stext[position - 1] not in _ATTRIBUTE_WORDS:
+                    if text == "(" and stext[position - 1] not in ATTRIBUTE_WORDS:
                         type_body = False
                     skipped = self._skip_group(position, high)
                     if skipped != position + 1:
@@ -360,7 +357,7 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
                     return index + 1
                 if index in pairs:
                     close = pairs[index]
-                    if first_text in _TYPE_KEYWORDS:
+                    if first_text in TYPE_KEYWORDS:
                         semicolon = self._next_significant(close + 1, end)
                         return (
                             semicolon + 1
@@ -440,7 +437,7 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
             return self._pairs[body] + 1
         return self._find_unit_end(body, end, context="block")
 
-    def _parse_preprocessor(self, start: int, end: int) -> _Replacement:
+    def _parse_preprocessor(self, start: int, end: int) -> Replacement:
         """解析一条逻辑预处理行，并对 #include 暴露 path field。
         Parse one logical preprocessor line and expose a path field for #include.
         """
@@ -466,7 +463,7 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
         kind = _PREPROCESSOR_KINDS.get(
             self._stext[low + 1] if high - low > 1 else "", "preproc_call"
         )
-        replacements: list[_Replacement] = []
+        replacements: list[Replacement] = []
         if kind == "preproc_include" and high - low > 2:
             path_start = self._sig[low + 2]
             if texts[path_start] == "<":
@@ -475,7 +472,7 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
                     path_end += 1
                 if path_end < line_end:
                     path_end += 1
-                    path = _token("system_lib_string", self._text(path_start, path_end), True)
+                    path = green_token("system_lib_string", self._text(path_start, path_end), True)
                     replacements.append((path_start, path_end, path, "path"))
             else:
                 replacements.append(
@@ -485,7 +482,7 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
         node = self._compose(kind, start, line_end, replacements)
         return (start, line_end, node, None)
 
-    def _parse_template(self, start: int, end: int, *, context: str) -> _Replacement | None:
+    def _parse_template(self, start: int, end: int, *, context: str) -> Replacement | None:
         """解析 template<...> 及其紧随的声明。
         Parse template<...> together with the declaration that immediately follows it.
         """
@@ -504,7 +501,7 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
         if declaration_end <= declaration_start:
             return None
 
-        nested: _Replacement | None
+        nested: Replacement | None
         if self._texts[declaration_start] in _CLASS_KEYWORDS:
             nested = self._parse_class(declaration_start, declaration_end)
         else:
@@ -527,7 +524,7 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
         """把模板参数列表拆成带 name/default 的参数节点。
         Split a template parameter list into parameter nodes carrying name/default fields.
         """
-        replacements: list[_Replacement] = []
+        replacements: list[Replacement] = []
         for part in self._split_top_level(open_angle + 1, close_angle, ",", angle_brackets=True):
             trimmed = self._trim(*part)
             if trimmed is None:
@@ -536,7 +533,7 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
             replacements.append((*trimmed, node, None))
         return self._compose("template_parameter_list", open_angle, close_angle + 1, replacements)
 
-    def _parse_class(self, start: int, end: int) -> _Replacement | None:
+    def _parse_class(self, start: int, end: int) -> Replacement | None:
         """解析 class/struct/union 定义并递归解析成员列表；不是定义时返回 None。
         Parse a class/struct/union definition and recursively parse its member list; None when
         the keyword does not start a definition.
@@ -554,11 +551,11 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
         body = self._compose(
             "field_declaration_list", open_brace, close_brace + 1, body_replacements
         )
-        replacements: list[_Replacement] = [(open_brace, close_brace + 1, body, "body")]
+        replacements: list[Replacement] = [(open_brace, close_brace + 1, body, "body")]
         if name is not None:
             first, last = name
             element: GreenElement = (
-                _token("type_identifier", self._texts[first], True)
+                green_token("type_identifier", self._texts[first], True)
                 if first == last
                 else self._compose("qualified_identifier", first, last + 1, [])
             )
@@ -669,7 +666,7 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
                 if following != "[":
                     return position
                 skip_to = pairs[index]
-            elif text in _ATTRIBUTE_WORDS and self._infos[index][0] == "identifier":
+            elif text in ATTRIBUTE_WORDS and self._infos[index][0] == "identifier":
                 if following == "(":
                     skip_to = pairs.get(sig[position + 1])
             if skip_to is None:
@@ -678,7 +675,7 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
                 position += 1
         return position
 
-    def _parse_namespace(self, start: int, end: int) -> _Replacement | None:
+    def _parse_namespace(self, start: int, end: int) -> Replacement | None:
         """解析命名空间定义（可带 inline），使内部声明仍可结构化查询；不是定义时返回 None。
         Parse a namespace definition (inline allowed) so declarations inside remain structurally
         queryable; None when the source is no definition.
@@ -718,7 +715,7 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
             return None
         replacements = self._parse_scope(open_brace + 1, close_brace, context="top")
         body = self._compose("declaration_list", open_brace, close_brace + 1, replacements)
-        nested: list[_Replacement] = [(open_brace, close_brace + 1, body, "body")]
+        nested: list[Replacement] = [(open_brace, close_brace + 1, body, "body")]
         if name is not None:
             first, last = name
             element: GreenElement = (
@@ -730,7 +727,7 @@ class _StructuralParser(_DeclarationMixin, _ExpressionMixin, _DeclaratorMixin, _
         node = self._compose("namespace_definition", start, close_brace + 1, nested)
         return (start, close_brace + 1, node, None)
 
-    def _parse_linkage(self, start: int, end: int) -> _Replacement | None:
+    def _parse_linkage(self, start: int, end: int) -> Replacement | None:
         """解析 extern "C" { ... } 这样的链接说明块，块内按顶层作用域解析；其他 extern 返回 None。
         Parse a linkage specification block such as extern "C" { ... }, whose inside is parsed
         as a top-level scope; None for any other extern.

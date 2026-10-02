@@ -7,10 +7,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from xr_syntax.core import SourceSpan, SyntaxTree, decode_source
+from xr_syntax.cpp._lexical_support import preprocessor_mask
+from xr_syntax.cpp.lexer import Lexed, Lexeme, lex
 from xr_syntax.i18n import tr
-
-from ._lexical_support import _preprocessor_mask
-from .lexer import _Lexed, _Lexeme, lex
 
 
 @dataclass(frozen=True)
@@ -106,15 +105,15 @@ def identifier_occurrences(source: str) -> tuple[CppIdentifierOccurrence, ...]:
     lexed = lex(source)
     if lexed.diagnostics:
         raise ValueError(lexed.diagnostics[0].message)
-    return _identifier_occurrences_of(lexed)
+    return identifier_occurrences_of(lexed)
 
 
-def _identifier_occurrences_of(lexed: _Lexed) -> tuple[CppIdentifierOccurrence, ...]:
+def identifier_occurrences_of(lexed: Lexed) -> tuple[CppIdentifierOccurrence, ...]:
     """词法结果中的 identifier occurrence，忽略注释和预处理逻辑行。
     The identifier occurrences of a lexing result outside comments and preprocessor logical
     lines.
     """
-    directives = _preprocessor_mask(lexed)
+    directives = preprocessor_mask(lexed)
     texts = lexed.texts
     infos = lexed.infos
     offsets = lexed.offsets
@@ -148,7 +147,7 @@ def find_invocations(
     name: str,
     *,
     template_angles: bool = False,
-    lexed: _Lexed | None = None,
+    lexed: Lexed | None = None,
 ) -> tuple[CppInvocationView, ...]:
     """在语法快照中查找指定 NAME(...) invocation。
     Find lexical NAME(...) invocations in one syntax-tree snapshot.
@@ -164,7 +163,7 @@ def find_invocations(
         return ()
     infos = lexed.infos
     offsets = lexed.offsets
-    directives = _preprocessor_mask(lexed)
+    directives = preprocessor_mask(lexed)
     encoded = tree.render_bytes()
     result = []
     for index, text in enumerate(texts):
@@ -191,7 +190,7 @@ def find_invocations(
     return tuple(result)
 
 
-def _next_code(lexed: _Lexed, start: int) -> int | None:
+def _next_code(lexed: Lexed, start: int) -> int | None:
     """从 start 起第一个不是空白、也不是注释的 lexeme。
     The first lexeme from start on that is neither whitespace nor a comment.
     """
@@ -203,7 +202,7 @@ def _next_code(lexed: _Lexed, start: int) -> int | None:
     return None
 
 
-def _matching_paren(lexed: _Lexed, opening: int) -> int | None:
+def _matching_paren(lexed: Lexed, opening: int) -> int | None:
     """匹配词法 invocation 的外层圆括号。
     Match the outer parenthesis of a lexical invocation.
     """
@@ -221,10 +220,10 @@ def _matching_paren(lexed: _Lexed, opening: int) -> int | None:
 
 
 def _top_level_commas(
-    items: list[_Lexeme],
+    items: list[Lexeme],
     *,
     template_angles: bool,
-) -> tuple[list[_Lexeme], bool]:
+) -> tuple[list[Lexeme], bool]:
     """返回顶层逗号以及列表分隔符是否平衡。
     Return top-level commas together with delimiter-balance state.
     """

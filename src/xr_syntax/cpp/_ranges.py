@@ -7,27 +7,26 @@ from __future__ import annotations
 from typing import Any, TypeVar
 
 from xr_syntax.core import GreenChild, GreenElement, GreenNode, SourceSpan
-from xr_syntax.core.green import _child, _node
+from xr_syntax.core.green import green_child, green_node
+from xr_syntax.cpp._support import ParserSupport, Replacement
 from xr_syntax.i18n import tr
-
-from ._support import _ParserSupport, _Replacement
 
 _Ranged = TypeVar("_Ranged", bound=tuple[Any, ...])
 
-# _Replacement 是 (start, end, element, field)：用结构元素替换 lexeme 区间 [start, end)。
+# Replacement 是 (start, end, element, field)：用结构元素替换 lexeme 区间 [start, end)。
 # 用普通元组而不是类，因为每次解析要创建上万个。
-# _Replacement is (start, end, element, field): a structural element replacing the lexeme range
+# Replacement is (start, end, element, field): a structural element replacing the lexeme range
 # [start, end). It is a plain tuple rather than a class because one parse creates tens of
 # thousands of them.
 
 # _split_top_level / _find_top_level_token 关心的分隔符；其他 token 直接跳过。
 # The delimiters _split_top_level and _find_top_level_token track; other tokens are skipped.
-_BRACKETS = frozenset("()[]{}")
+BRACKETS = frozenset("()[]{}")
 _OPENING_BRACKETS = frozenset("([{")
 _ANGLE_BRACKETS = frozenset(("<", ">", ">>"))
 
 
-class _RangeMixin(_ParserSupport):
+class RangeMixin(ParserSupport):
     """提供 parser 各阶段共享的区间扫描、匹配、compose 与诊断操作。
     Provide shared range scanning, delimiter matching, composition, and diagnostics for parser stages.
 
@@ -178,7 +177,7 @@ class _RangeMixin(_ParserSupport):
         position = low
         while position < high:
             text = stext[position]
-            if text in _BRACKETS:
+            if text in BRACKETS:
                 # 深度为 0 时整组跳过；尖括号只在括号外计数，(1 > 2) 里的 > 不关闭模板实参。
                 # At depth 0 a group is skipped as a whole; angle brackets count only outside
                 # brackets, so the > in (1 > 2) closes no template argument list.
@@ -229,7 +228,7 @@ class _RangeMixin(_ParserSupport):
         position = low
         while position < high:
             text = stext[position]
-            if text in _BRACKETS:
+            if text in BRACKETS:
                 if text in "([{" and not (round_depth or square_depth or brace_depth):
                     skipped = self._skip_group(position, high)
                     if skipped != position + 1:
@@ -307,14 +306,14 @@ class _RangeMixin(_ParserSupport):
         kind: str,
         start: int,
         end: int,
-        replacements: list[_Replacement],
+        replacements: list[Replacement],
     ) -> GreenNode:
         """用不重叠结构节点替换原 token 区间并构造一个 GreenNode。
         Compose non-overlapping structured replacements into a GreenNode while preserving untouched source.
 
-        区间外的 replacement 被忽略；重叠时按 _deduplicate_replacements 取舍。
+        区间外的 replacement 被忽略；重叠时按 deduplicate_replacements 取舍。
         Replacements outside the range are ignored; overlapping ones are chosen as
-        _deduplicate_replacements does.
+        deduplicate_replacements does.
         """
         plain = self._plain
         offsets = self._offsets
@@ -327,22 +326,22 @@ class _RangeMixin(_ParserSupport):
             if item_start < cursor or not (start <= item_start < item_end <= end):
                 break
             children += plain[cursor:item_start]
-            children.append(_child(element, field))
+            children.append(green_child(element, field))
             cursor = item_end
         else:
             children += plain[cursor:end]
-            return _node(kind, tuple(children), offsets[end] - offsets[start])
-        ordered = _deduplicate_replacements(
+            return green_node(kind, tuple(children), offsets[end] - offsets[start])
+        ordered = deduplicate_replacements(
             [item for item in replacements if start <= item[0] < item[1] <= end]
         )
         children = []
         cursor = start
         for item_start, item_end, element, field in ordered:
             children += plain[cursor:item_start]
-            children.append(_child(element, field))
+            children.append(green_child(element, field))
             cursor = item_end
         children += plain[cursor:end]
-        return _node(kind, tuple(children), offsets[end] - offsets[start])
+        return green_node(kind, tuple(children), offsets[end] - offsets[start])
 
     def _diagnostic(self, message: str, start: int, end: int) -> None:
         """以 lexeme 字节范围记录结构 parser 诊断。
@@ -358,7 +357,7 @@ class _RangeMixin(_ParserSupport):
         self.diagnostics.append(self._lexed.diagnostic(message, span))
 
 
-def _deduplicate_replacements(replacements: list[_Ranged]) -> list[_Ranged]:
+def deduplicate_replacements(replacements: list[_Ranged]) -> list[_Ranged]:
     """按源码顺序保留互不重叠的 replacement；优先更早、更大的结构。
     Keep non-overlapping replacements in source order, preferring earlier and larger structures.
 
@@ -388,7 +387,7 @@ def _deduplicate_replacements(replacements: list[_Ranged]) -> list[_Ranged]:
     return result
 
 
-def _empty_expression() -> GreenElement:
+def empty_expression() -> GreenElement:
     """没有任何有效 token 的表达式。
     An expression without any significant token.
     """

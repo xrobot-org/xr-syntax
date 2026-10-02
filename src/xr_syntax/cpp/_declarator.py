@@ -5,10 +5,9 @@ Internal C++ parser helpers for recognizing function and variable declarators.
 from __future__ import annotations
 
 from xr_syntax.core import GreenElement
-from xr_syntax.core.green import _node, _token
-
-from ._support import _ParserSupport, _Replacement
-from .lexer import _CONTROL, _LITERAL_KINDS, _QUALIFIERS, _STORAGE, _TYPE_WORDS
+from xr_syntax.core.green import green_node, green_token
+from xr_syntax.cpp._support import ParserSupport, Replacement
+from xr_syntax.cpp.lexer import CONTROL, LITERAL_KINDS, QUALIFIERS, STORAGE, TYPE_WORDS
 
 # 这些名字后面的括号不是函数参数列表。
 # Parentheses after these names are no function parameter list.
@@ -29,12 +28,9 @@ _NOT_FUNCTION_NAMES = frozenset(
 # 函数参数列表之前不会出现的顶层记号。
 # Top-level tokens that never come before a function parameter list.
 _DECLARATOR_STOPS = frozenset({"=", "{", ";"})
-_TYPE_STORAGE_QUALIFIER = frozenset(_TYPE_WORDS | _STORAGE | _QUALIFIERS)
+_TYPE_STORAGE_QUALIFIER = frozenset(TYPE_WORDS | STORAGE | QUALIFIERS)
 _DECLARATION_START = frozenset(
-    _STORAGE
-    | _QUALIFIERS
-    | _TYPE_WORDS
-    | {"constexpr", "consteval", "constinit", "using", "typedef"}
+    STORAGE | QUALIFIERS | TYPE_WORDS | {"constexpr", "consteval", "constinit", "using", "typedef"}
 )
 # 名字之前出现这些运算符时不再猜成声明；pointer/reference punctuator 属于 declarator。
 # These operators before the name stop the declaration guess; pointer/reference punctuators belong
@@ -62,20 +58,20 @@ _EXPRESSION_OPERATORS = frozenset(
     }
 )
 _FUNCTION_SPECIFIERS = frozenset(
-    _STORAGE | {"inline", "constexpr", "consteval", "extern", "friend", "virtual", "explicit"}
+    STORAGE | {"inline", "constexpr", "consteval", "extern", "friend", "virtual", "explicit"}
 )
 _ARGUMENT_OPERATORS = frozenset({"+", "-", "/", "%", "?"})
-_TYPE_KEYWORDS = frozenset({"class", "struct", "union", "enum"})
+TYPE_KEYWORDS = frozenset({"class", "struct", "union", "enum"})
 # 后面括号里是属性的词。
 # Words whose following parentheses hold attributes.
-_ATTRIBUTE_WORDS = frozenset({"alignas", "__attribute__", "__declspec"})
-_ELABORATED = frozenset(_TYPE_KEYWORDS | {"typename"})
+ATTRIBUTE_WORDS = frozenset({"alignas", "__attribute__", "__declspec"})
+_ELABORATED = frozenset(TYPE_KEYWORDS | {"typename"})
 _POINTER_OPERATORS = frozenset({"*", "&", "&&"})
 _OPENING = frozenset({"(", "[", "{"})
 _AFTER_VARIABLE_NAME = frozenset({"=", "(", "{", "[", ",", ";"})
 
 
-class _DeclaratorMixin(_ParserSupport):
+class DeclaratorMixin(ParserSupport):
     """提供函数、参数、变量名称与声明形态的 source-level 判定。
     Provide source-level recognition of function/parameter/variable names and declarator shapes.
     """
@@ -173,14 +169,14 @@ class _DeclaratorMixin(_ParserSupport):
                 or inner is None
                 or self._next_significant(inner + 1, last) is not None
                 or self._infos[inner][0] != "identifier"
-                or self._texts[inner] in _TYPE_WORDS
+                or self._texts[inner] in TYPE_WORDS
             ):
                 return None
             return opening, last + 1
         if last is None or self._infos[last][0] != "identifier":
             return None
         text = self._texts[last]
-        if text in _TYPE_WORDS or text in _CONTROL or text in _NOT_FUNCTION_NAMES:
+        if text in TYPE_WORDS or text in CONTROL or text in _NOT_FUNCTION_NAMES:
             return None
         before = self._previous_significant(last - 1, start)
         if before is not None and self._texts[before] == "~":
@@ -195,7 +191,7 @@ class _DeclaratorMixin(_ParserSupport):
         if self._texts[start] == "(":
             inner = self._next_significant(start + 1, end)
             assert inner is not None
-            name = _token("identifier", self._texts[inner], True)
+            name = green_token("identifier", self._texts[inner], True)
             return self._compose(
                 "parenthesized_declarator", start, end, [(inner, inner + 1, name, "declarator")]
             )
@@ -203,8 +199,8 @@ class _DeclaratorMixin(_ParserSupport):
         if stripped.startswith("operator") or stripped.startswith("~"):
             kind = "operator_name" if stripped.startswith("operator") else "destructor_name"
             offsets = self._offsets
-            return _node(kind, tuple(self._plain[start:end]), offsets[end] - offsets[start])
-        return _token("identifier", stripped, True)
+            return green_node(kind, tuple(self._plain[start:end]), offsets[end] - offsets[start])
+        return green_token("identifier", stripped, True)
 
     def _prototype_is_function(
         self,
@@ -259,7 +255,7 @@ class _DeclaratorMixin(_ParserSupport):
                 elif text == ">" or text == ">>":
                     angles = max(0, angles - len(text))
                 elif not angles and (
-                    infos[sig[position]][0] in _LITERAL_KINDS or text in _ARGUMENT_OPERATORS
+                    infos[sig[position]][0] in LITERAL_KINDS or text in _ARGUMENT_OPERATORS
                 ):
                     return False
                 position += 1
@@ -291,7 +287,7 @@ class _DeclaratorMixin(_ParserSupport):
             index = sig[position]
             if (
                 infos[index][0] == "identifier"
-                and stext[position] not in _TYPE_WORDS
+                and stext[position] not in TYPE_WORDS
                 and stext[position - 1] in _POINTER_OPERATORS
                 and self._enclosing_open(sig[position - 1], "(", start) is not None
             ):
@@ -310,13 +306,13 @@ class _DeclaratorMixin(_ParserSupport):
                 angles += 1
             elif text == ">" or text == ">>":
                 angles = max(0, angles - len(text))
-            elif angles or infos[sig[position]][0] != "identifier" or text in _QUALIFIERS:
+            elif angles or infos[sig[position]][0] != "identifier" or text in QUALIFIERS:
                 pass
             elif text in _ELABORATED:
                 typed = typed or (template and text in ("typename", "class"))
             elif (
                 typed
-                and text not in _TYPE_WORDS
+                and text not in TYPE_WORDS
                 and (position == low or stext[position - 1] != "::")
                 and (position + 1 == high or stext[position + 1] != "::")
             ):
@@ -376,7 +372,7 @@ class _DeclaratorMixin(_ParserSupport):
                             if (
                                 stext[inner - 1] in _POINTER_OPERATORS
                                 and infos[sig[inner]][0] == "identifier"
-                                and stext[inner] not in _TYPE_WORDS
+                                and stext[inner] not in TYPE_WORDS
                             ):
                                 return sig[inner]
                             inner += 1
@@ -412,10 +408,10 @@ class _DeclaratorMixin(_ParserSupport):
             position = low
             while position < high:
                 text = stext[position]
-                if text in _TYPE_KEYWORDS:
+                if text in TYPE_KEYWORDS:
                     type_body = True
                 elif text in ("(", "{") and pairs.get(sig[position], end) < end:
-                    if text == "(" and position > low and stext[position - 1] in _ATTRIBUTE_WORDS:
+                    if text == "(" and position > low and stext[position - 1] in ATTRIBUTE_WORDS:
                         position = self._skip_group(position, high)
                         continue
                     if text == "{" and type_body:
@@ -441,7 +437,7 @@ class _DeclaratorMixin(_ParserSupport):
             if (
                 infos[sig[position]][0] == "identifier"
                 and text not in _TYPE_STORAGE_QUALIFIER
-                and text not in _ATTRIBUTE_WORDS
+                and text not in ATTRIBUTE_WORDS
                 and not (position > low and stext[position - 1] == "::" and not at_end)
                 and not (position + 1 < high and stext[position + 1] == "::")
             ):
@@ -454,7 +450,7 @@ class _DeclaratorMixin(_ParserSupport):
         while lead < high:
             if stext[lead] == "[":
                 lead = self._skip_group(lead, high)
-            elif stext[lead] in _ATTRIBUTE_WORDS and lead + 1 < high and stext[lead + 1] == "(":
+            elif stext[lead] in ATTRIBUTE_WORDS and lead + 1 < high and stext[lead + 1] == "(":
                 lead = self._skip_group(lead + 1, high)
             else:
                 break
@@ -486,7 +482,7 @@ class _DeclaratorMixin(_ParserSupport):
         ):
             before -= 2
         while before >= low and (
-            stext[before] in _POINTER_OPERATORS or stext[before] in _QUALIFIERS
+            stext[before] in _POINTER_OPERATORS or stext[before] in QUALIFIERS
         ):
             before -= 1
         return before >= low and (
@@ -534,17 +530,17 @@ class _DeclaratorMixin(_ParserSupport):
         before_name = self._previous_significant(name - 1, first_index)
         return before_name is not None and self._infos[before_name][0] == "identifier"
 
-    def _specifier_replacements(self, start: int, end: int) -> list[_Replacement]:
+    def _specifier_replacements(self, start: int, end: int) -> list[Replacement]:
         """把 storage/type qualifier 包装成稳定 named node，供 convenience view 查询。
         Build structured replacements for storage-class and type qualifiers.
         """
-        result: list[_Replacement] = []
+        result: list[Replacement] = []
         stext = self._stext
         low, high = self._span(start, end)
         for position in range(low, high):
             word = stext[position]
-            if word in _STORAGE or word in _QUALIFIERS:
-                kind = "storage_class_specifier" if word in _STORAGE else "type_qualifier"
+            if word in STORAGE or word in QUALIFIERS:
+                kind = "storage_class_specifier" if word in STORAGE else "type_qualifier"
                 index = self._sig[position]
                 result.append((index, index + 1, self._compose(kind, index, index + 1, []), None))
         return result
@@ -562,7 +558,7 @@ class _DeclaratorMixin(_ParserSupport):
             return None
         return self._sig[position], name_start
 
-    def _special_member_clause(self, start: int, end: int) -> _Replacement | None:
+    def _special_member_clause(self, start: int, end: int) -> Replacement | None:
         """识别 `= delete` / `= default` 子句。
         Recognize an = delete or = default special-member clause.
         """

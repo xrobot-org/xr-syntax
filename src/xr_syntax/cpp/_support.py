@@ -5,15 +5,15 @@ Strict internal typing contract shared by the native C++ parser mixins.
 from __future__ import annotations
 
 from xr_syntax.core import Diagnostic, GreenChild, GreenElement, GreenNode
-from xr_syntax.cpp.lexer import _Lexed
+from xr_syntax.cpp.lexer import Lexed
 
 # (start, end, element, field)：用 element 替换 lexeme 区间 [start, end)，边上带 field。
 # (start, end, element, field): element replaces the lexeme range [start, end), with field on the
 # edge.
-_Replacement = tuple[int, int, GreenElement, "str | None"]
+Replacement = tuple[int, int, GreenElement, "str | None"]
 
 
-class _ParserSupport:
+class ParserSupport:
     """描述 native parser mixin 之间互相依赖的内部状态和接口。
     Describe the internal state and interface shared by native parser mixins.
 
@@ -50,7 +50,7 @@ class _ParserSupport:
     _texts: list[str]
     _infos: list[tuple[str, bool, bool]]
     _offsets: list[int]
-    _lexed: _Lexed
+    _lexed: Lexed
     _count: int
     _sig: list[int]
     _stext: list[str]
@@ -151,7 +151,7 @@ class _ParserSupport:
         kind: str,
         start: int,
         end: int,
-        replacements: list[_Replacement],
+        replacements: list[Replacement],
     ) -> GreenNode:
         """把不重叠 replacement 组合成 green node。
         Compose non-overlapping structured replacements into a GreenNode while preserving untouched source.
@@ -188,7 +188,7 @@ class _ParserSupport:
         end: int,
         *,
         context: str,
-    ) -> list[_Replacement]:
+    ) -> list[Replacement]:
         """解析连续源码作用域。
         Parse one continuous scope using top-level statement/declaration boundaries.
         """
@@ -207,7 +207,7 @@ class _ParserSupport:
         start: int,
         end: int,
         field: str | None = None,
-    ) -> _Replacement | None:
+    ) -> Replacement | None:
         """构造不吞掉 expression 两端 trivia 的 replacement。
         Create an expression replacement whose span exactly matches the trivia-trimmed expression node.
         """
@@ -219,7 +219,7 @@ class _ParserSupport:
         """
         raise NotImplementedError
 
-    def _parse_return(self, start: int, end: int) -> _Replacement:
+    def _parse_return(self, start: int, end: int) -> Replacement:
         """解析 return 语句。
         Parse a return statement together with its returned expression.
         """
@@ -230,19 +230,19 @@ class _ParserSupport:
         start: int,
         end: int,
         keyword: str,
-    ) -> _Replacement:
+    ) -> Replacement:
         """解析控制流语句。
         Parse the condition and compound body of if/for/while/switch/catch constructs.
         """
         raise NotImplementedError
 
-    def _parse_do(self, start: int, end: int) -> _Replacement:
+    def _parse_do(self, start: int, end: int) -> Replacement:
         """解析 do/while 语句。
         Parse a do/while construct while recursively structuring its body.
         """
         raise NotImplementedError
 
-    def _parse_concept(self, start: int, end: int) -> _Replacement:
+    def _parse_concept(self, start: int, end: int) -> Replacement:
         """解析 concept 定义。
         Parse a concept definition and continue parsing the expression after =.
         """
@@ -312,7 +312,7 @@ class _ParserSupport:
         self,
         start: int,
         end: int,
-    ) -> list[_Replacement]:
+    ) -> list[Replacement]:
         """返回 storage/type qualifier 的结构化 replacement。
         Build structured replacements for storage-class and type qualifiers.
         """
@@ -332,7 +332,7 @@ class _ParserSupport:
         self,
         start: int,
         end: int,
-    ) -> _Replacement | None:
+    ) -> Replacement | None:
         """识别 = delete/default 子句。
         Recognize an = delete or = default special-member clause.
         """
