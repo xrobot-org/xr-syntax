@@ -18,15 +18,36 @@ def test_code_tokens_keep_character_and_byte_offsets_distinct() -> None:
     assert value.start != value.span.start
 
 
-def test_code_tokens_ignore_comments_and_preprocessor_logical_lines() -> None:
-    source = "#define USE(x) x \\\n  hidden\n// ignored\nvisible + true"
-    tokens = code_tokens(source)
-    assert [item.text for item in tokens] == ["visible", "+", "true"]
-    assert [item.kind for item in tokens] == ["identifier", "punct", "identifier"]
+@pytest.mark.parametrize(
+    ("source", "tokens"),
+    [
+        pytest.param(
+            "#define USE(x) x \\\n  hidden\n// ignored\nvisible + true",
+            [("visible", "identifier"), ("+", "punct"), ("true", "identifier")],
+            id="continued-directive",
+        ),
+        pytest.param(
+            "int x;\n#define A 1\nint y;",
+            [
+                ("int", "identifier"),
+                ("x", "identifier"),
+                (";", "punct"),
+                ("int", "identifier"),
+                ("y", "identifier"),
+                (";", "punct"),
+            ],
+            id="code-before-a-directive",
+        ),
+    ],
+)
+def test_code_tokens_ignore_comments_and_preprocessor_logical_lines(
+    source: str, tokens: list[tuple[str, str]]
+) -> None:
+    assert [(item.text, item.kind) for item in code_tokens(source)] == tokens
 
 
 def test_code_token_literal_and_number_categories() -> None:
-    tokens = code_tokens('f("x", R"tag(a,b)tag", 1.0f)')
+    tokens = code_tokens('f("x", R"tag(a,b)tag", 1.0f, u8"y", L\'z\', .5)')
     assert [(item.text, item.kind) for item in tokens] == [
         ("f", "identifier"),
         ("(", "punct"),
@@ -35,21 +56,30 @@ def test_code_token_literal_and_number_categories() -> None:
         ('R"tag(a,b)tag"', "literal"),
         (",", "punct"),
         ("1.0f", "number"),
+        (",", "punct"),
+        ('u8"y"', "literal"),
+        (",", "punct"),
+        ("L'z'", "literal"),
+        (",", "punct"),
+        (".5", "number"),
         (")", "punct"),
     ]
 
 
-def test_matching_delimiter_handles_nested_templates_and_shift_token() -> None:
-    tokens = code_tokens("std::vector<std::pair<int, float>> value")
-    opening = next(index for index, item in enumerate(tokens) if item.text == "<")
-    closing = matching_delimiter(tokens, opening)
-    assert tokens[closing].text == ">>"
-    assert tokens[closing + 1].text == "value"
-
-
-def test_matching_delimiter_does_not_treat_comparison_as_nested_angle() -> None:
-    tokens = code_tokens("(a < b)")
-    assert matching_delimiter(tokens, 0) == len(tokens) - 1
+@pytest.mark.parametrize(
+    ("source", "closing"),
+    [
+        pytest.param("std::vector<std::pair<int, float>> value", 11, id="shift-closes-two"),
+        pytest.param("A<B<int>, C> x", 8, id="nested"),
+        pytest.param("A<B<C<int>> > x", 8, id="shift-inside"),
+        pytest.param("((a)) b", 4, id="nested-parentheses"),
+        pytest.param("(a < b) c", 4, id="comparison-in-parentheses"),
+    ],
+)
+def test_matching_delimiter_handles_nesting_and_the_shift_token(source: str, closing: int) -> None:
+    tokens = code_tokens(source)
+    opening = next(index for index, item in enumerate(tokens) if item.text in "(<")
+    assert matching_delimiter(tokens, opening) == closing
 
 
 def test_matching_delimiter_reports_invalid_or_unclosed_input() -> None:
@@ -87,21 +117,25 @@ def test_the_digraph_rule_for_less_colon_colon(source: str, texts: list[str]) ->
     assert [item.text for item in code_tokens(source)] == texts
 
 
-def test_raw_strings_hold_quotes_and_comment_markers() -> None:
-    source = 'auto a = R"x(say "hi" // not a comment)x"; auto b = R"(/* " */)"; int c;'
-    texts = [item.text for item in code_tokens(source)]
-    assert texts == [
-        "auto",
-        "a",
-        "=",
-        'R"x(say "hi" // not a comment)x"',
-        ";",
-        "auto",
-        "b",
-        "=",
-        'R"(/* " */)"',
-        ";",
-        "int",
-        "c",
-        ";",
-    ]
+@pytest.mark.parametrize(
+    ("source", "literals"),
+    [
+        pytest.param(
+            'auto a = R"x(say "hi" // not a comment)x"; auto b = R"(/* " */)"; int c;',
+            ['R"x(say "hi" // not a comment)x"', 'R"(/* " */)"'],
+            id="quotes-and-comment-markers",
+        ),
+        pytest.param('auto e = R"()"; int c;', ['R"()"'], id="empty"),
+        # 拆开 >> 之后，原始字符串的下标随之后移。
+        # After a >> is split, the index of the raw string moves along.
+        pytest.param(
+            'template <typename T = A<int>> struct S {}; auto s = R"(x)"; int c;',
+            ['R"(x)"'],
+            id="after-a-split-closer",
+        ),
+    ],
+)
+def test_raw_strings_are_whole_literals(source: str, literals: list[str]) -> None:
+    tokens = code_tokens(source)
+    assert [item.text for item in tokens if item.kind == "literal"] == literals
+    assert [item.text for item in tokens[-3:]] == ["int", "c", ";"]

@@ -7,7 +7,6 @@ from __future__ import annotations
 import argparse
 import sys
 import textwrap
-import unicodedata
 
 import pytest
 
@@ -25,13 +24,6 @@ def _help_lines(text: str, columns: int, monkeypatch: pytest.MonkeyPatch) -> lis
     parser.add_argument("name", help=text)
     block = parser.format_help().split("\n  name", 1)[1].splitlines()
     return [line.strip() for line in block if line.strip()]
-
-
-def _columns(text: str) -> int:
-    """text 在终端中占的列数：宽字符和全角字符占 2 列。
-    The terminal columns text takes: wide and fullwidth characters take 2.
-    """
-    return sum(2 if unicodedata.east_asian_width(char) in "WF" else 1 for char in text)
 
 
 def test_the_first_set_variable_chooses_the_language(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -104,6 +96,12 @@ def test_argparse_texts_are_translated_in_chinese(
         pytest.param("甲乙丙丁戊，己", ["甲乙丙丁", "戊，己"], id="no-comma-at-line-start"),
         pytest.param("甲乙丙丁（戊己）庚", ["甲乙丙丁", "（戊己）庚"], id="no-bracket-at-line-end"),
         pytest.param("用 java -jar 启动程序", ["用 java", "-jar 启动程", "序"], id="whole-words"),
+        pytest.param("abcdefghij甲乙", ["abcdefghij", "甲乙"], id="break-before-a-wide-character"),
+        pytest.param(
+            "甲 https://a.example/xyz 乙",
+            ["甲", "https://a.example/xyz", "乙"],
+            id="overlong-word-on-its-own-line",
+        ),
     ],
 )
 def test_wide_help_text_wraps_by_column_width(
@@ -117,23 +115,3 @@ def test_english_help_text_wraps_as_argparse_wraps_it(monkeypatch: pytest.Monkey
     # 终端宽 40 列时帮助文字有 30 列。
     # At a terminal width of 40 columns, help text has 30 columns.
     assert _help_lines(english, 40, monkeypatch) == textwrap.wrap(english, 30)
-
-
-def test_help_holding_chinese_wraps_by_column_width(monkeypatch: pytest.MonkeyPatch) -> None:
-    localize_argparse()
-    monkeypatch.setenv("COLUMNS", "60")
-    text = (
-        "缺少 LibXR 时从哪里克隆：auto、github，或基础地址、仓库地址（默认：auto）；"
-        ".gitmodules 始终记录 https://github.com/xrobot-org/libxr.git"
-    )
-    parser = argparse.ArgumentParser(prog="tool")
-    parser.add_argument("--source", help=text)
-    lines = parser.format_help().splitlines()
-    first = next(i for i, line in enumerate(lines) if line.startswith("  --source SOURCE"))
-    # 帮助的第一行与选项同行。
-    # The first help line shares the line of the option.
-    body = [lines[first].split("SOURCE", 1)[1], *lines[first + 1 :]]
-    assert "".join(line.strip() for line in body).replace(" ", "") == text.replace(" ", "")
-    assert all(_columns(line) <= 58 for line in lines[first:-1])
-    assert body[-1].strip() == "https://github.com/xrobot-org/libxr.git"
-    assert not any(line.strip()[:1] in "，。、；：）" for line in body)

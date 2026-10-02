@@ -106,15 +106,26 @@ class ExpressionMixin(ParserSupport):
         return (start, end, node, None)
 
     def _parse_do(self, start: int, end: int) -> Replacement:
-        """解析 do/while 结构；body 内部仍递归解析。
-        Parse a do/while construct while recursively structuring its body.
+        """解析 do/while 结构：花括号 body 递归解析，末尾 while (...) 的括号内是 condition。
+        Parse a do/while construct: a braced body is structured recursively, and the inside of
+        the while (...) at the end is the condition.
         """
+        texts = self._texts
         replacements: list[Replacement] = []
         body_open = self._next_significant(start + 1, end)
-        if body_open is not None and self._texts[body_open] == "{" and body_open in self._pairs:
+        if body_open is not None and texts[body_open] == "{" and body_open in self._pairs:
             body_close = self._pairs[body_open]
             body = self._parse_compound(body_open, body_close)
             replacements.append((body_open, body_close + 1, body, "body"))
+        close = self._previous_significant(self._before_trailing_semicolon(start, end) - 1, start)
+        opening = None if close is None else self._reverse_pairs.get(close)
+        keyword = None if opening is None else self._previous_significant(opening - 1, start)
+        if close is not None and opening is not None and keyword is not None:
+            condition_start = self._next_significant(opening + 1, close)
+            if texts[keyword] == "while" and condition_start is not None:
+                condition = self._expression_replacement(condition_start, close, "condition")
+                if condition is not None:
+                    replacements.append(condition)
         return (start, end, self._compose("do_statement", start, end, replacements), None)
 
     def _parse_concept(self, start: int, end: int) -> Replacement:

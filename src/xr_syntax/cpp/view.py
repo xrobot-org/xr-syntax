@@ -92,8 +92,6 @@ class CppParameterView:
         Return default source text when present.
         """
         value = self.node.child_by_field("default_value")
-        if value is None:
-            value = self.node.child_by_field("value")
         return None if value is None else value.text.strip()
 
 

@@ -58,8 +58,16 @@ def test_surrogateescaped_text_gives_back_the_original_bytes() -> None:
     assert CppDocument.parse(text).render_bytes() == source
 
 
-def test_a_complete_source_has_no_diagnostics() -> None:
-    document = CppDocument.parse(b"int f(int a) { return a + 1; }\n")
+@pytest.mark.parametrize(
+    "source",
+    [
+        pytest.param("int f(int a) { return a + 1; }\n", id="function"),
+        pytest.param("int x; // end", id="line-comment-at-the-end"),
+        pytest.param("int x; /**/", id="empty-block-comment-at-the-end"),
+    ],
+)
+def test_a_complete_source_has_no_diagnostics(source: str) -> None:
+    document = CppDocument.parse(source)
     assert document.diagnostics == ()
     assert document.root.kind == "translation_unit"
 
@@ -170,12 +178,6 @@ def test_one_parser_can_be_shared_by_threads() -> None:
     assert rendered == sources
 
 
-def test_the_root_is_a_node_without_parent() -> None:
-    root = CppDocument.parse("int x;\n").root
-    assert isinstance(root, SyntaxNode)
-    assert root.parent is None
-
-
 @pytest.mark.parametrize(
     "body",
     [
@@ -193,6 +195,9 @@ def test_an_extern_c_block_is_a_scope() -> None:
     document = CppDocument.parse(source)
     assert [view.header for view in document.include_views()] == ["a.h"]
     assert [view.name for view in document.class_views()] == ["X"]
+    linkage = document.nodes("linkage_specification")[0]
+    assert linkage.child_by_field("value").text == '"C"'
+    assert linkage.child_by_field("body").text.startswith('{\n#include "a.h"')
 
 
 def test_an_inline_namespace_is_a_namespace() -> None:
@@ -211,7 +216,9 @@ def test_a_namespace_alias_is_no_namespace() -> None:
 def test_a_nested_namespace_definition_keeps_its_whole_name() -> None:
     document = CppDocument.parse("namespace a::b { class W {}; }\n")
     namespaces = document.nodes("namespace_definition")
-    assert [node.child_by_field("name").text for node in namespaces] == ["a::b"]
+    assert [
+        (node.child_by_field("name").text, node.child_by_field("body").text) for node in namespaces
+    ] == [("a::b", "{ class W {}; }")]
 
 
 def test_a_comment_before_a_directive_keeps_the_directive() -> None:
@@ -234,30 +241,189 @@ def test_a_constructor_body_follows_its_initializers(initializers: str) -> None:
 
 
 @pytest.mark.parametrize(
-    ("source", "name"),
+    ("source", "parts"),
     [
-        pytest.param("std::string s;", "s", id="qualified-type"),
-        pytest.param("std::vector<std::vector<int>> v;", "v", id="closing-shift"),
-        pytest.param('std::string Foo::name_ = "x";', "Foo::name_", id="qualified-name"),
-        pytest.param("Foo* Foo::map_[4] = {nullptr};", "Foo::map_", id="qualified-array"),
-        pytest.param("typedef void (*Callback)(void*);", "Callback", id="function-pointer-type"),
-        pytest.param("void (*handler)(int) = nullptr;", "handler", id="function-pointer"),
-        pytest.param("typedef struct { int a; } Point;", "Point", id="typedef-struct"),
+        pytest.param("std::string s;", ("std::string", "s", None), id="qualified-type"),
+        pytest.param(
+            "std::vector<std::vector<int>> v;",
+            ("std::vector<std::vector<int>>", "v", None),
+            id="closing-shift",
+        ),
+        pytest.param(
+            'std::string Foo::name_ = "x";',
+            ("std::string", "Foo::name_", '"x"'),
+            id="qualified-name",
+        ),
+        pytest.param(
+            "Foo* Foo::map_[4] = {nullptr};",
+            ("Foo", "Foo::map_", "{nullptr}"),
+            id="qualified-array",
+        ),
+        pytest.param(
+            "typedef void (*Callback)(void*);",
+            ("typedef void", "Callback", None),
+            id="function-pointer-type",
+        ),
+        pytest.param(
+            "void (*handler)(int) = nullptr;", ("void", "handler", "nullptr"), id="function-pointer"
+        ),
+        pytest.param(
+            "typedef struct { int a; } Point;",
+            ("typedef struct { int a; }", "Point", None),
+            id="typedef-struct",
+        ),
         pytest.param(
             "typedef struct __attribute__((packed)) { int a; } Packed;",
-            "Packed",
+            ("typedef struct __attribute__((packed)) { int a; }", "Packed", None),
             id="typedef-packed-struct",
         ),
         pytest.param(
-            "typedef enum {\n#if defined(A)\n  X,\n#endif\n} Kind;", "Kind", id="typedef-enum"
+            "typedef enum {\n#if defined(A)\n  X,\n#endif\n} Kind;",
+            ("typedef enum {\n#if defined(A)\n  X,\n#endif\n}", "Kind", None),
+            id="typedef-enum",
+        ),
+        pytest.param("static const int x = 1;", ("const int", "x", "1"), id="storage"),
+        pytest.param("std::string const* p;", ("std::string const", "p", None), id="pointer"),
+        pytest.param("Foo f(1, 2);", ("Foo", "f", "(1, 2)"), id="direct-initialization"),
+        pytest.param("Foo g{3};", ("Foo", "g", "{3}"), id="list-initialization"),
+        pytest.param(
+            "[[maybe_unused]] int z;", ("[[maybe_unused]] int", "z", None), id="attribute"
         ),
     ],
 )
-def test_a_declaration_gives_its_declarator_name(source: str, name: str) -> None:
+def test_a_declaration_gives_its_type_name_and_value(
+    source: str, parts: tuple[str, str, str | None]
+) -> None:
     declaration = CppDocument.parse(source).nodes("declaration")[0]
     declarator = declaration.child_by_field("declarator")
     assert isinstance(declarator, SyntaxNode)
-    assert declarator.child_by_field("declarator").text == name
+    value = declarator.child_by_field("value")
+    assert (
+        declaration.child_by_field("type").text,
+        declarator.child_by_field("declarator").text,
+        None if value is None else value.text,
+    ) == parts
+
+
+@pytest.mark.parametrize(
+    ("source", "parts"),
+    [
+        pytest.param(
+            "static int f(int a) const noexcept override { return a; }",
+            ("int", "f(int a) const noexcept override", "f"),
+            id="specifiers-and-suffixes",
+        ),
+        pytest.param("auto f() -> Foo { return {}; }", ("auto", "f()", "f"), id="trailing-return"),
+        pytest.param("Foo::~Foo() {}", (None, "Foo::~Foo()", "Foo::~Foo"), id="out-of-class"),
+        pytest.param(
+            "bool Foo::operator==(const Foo&) const { return true; }",
+            ("bool", "Foo::operator==(const Foo&) const", "Foo::operator=="),
+            id="qualified-operator",
+        ),
+        pytest.param(
+            "bool (isinf)(float x) { return false; }",
+            ("bool", "(isinf)(float x)", "(isinf)"),
+            id="parenthesized-name",
+        ),
+    ],
+)
+def test_a_function_definition_gives_its_type_declarator_and_name(
+    source: str, parts: tuple[str | None, str, str]
+) -> None:
+    function = CppDocument.parse(source).nodes("function_definition")[0]
+    declarator = function.child_by_field("declarator")
+    assert isinstance(declarator, SyntaxNode)
+    kind = function.child_by_field("type")
+    assert (
+        None if kind is None else kind.text,
+        declarator.text,
+        declarator.child_by_field("declarator").text,
+    ) == parts
+
+
+def test_parameter_kinds_tell_defaults_and_type_parameters_apart() -> None:
+    document = CppDocument.parse(
+        "void f(int a, int b = 1);\n"
+        "template <typename T, typename U = int, int N = 3, typename... Ts> class C {};\n"
+    )
+    assert [
+        [(node.kind, node.child_by_field("declarator").kind) for node in parameters.named_children]
+        for parameters in document.root.descendants(
+            kinds={"parameter_list", "template_parameter_list"}
+        )
+    ] == [
+        [
+            ("parameter_declaration", "identifier"),
+            ("optional_parameter_declaration", "identifier"),
+        ],
+        [
+            ("type_parameter_declaration", "type_identifier"),
+            ("optional_type_parameter_declaration", "type_identifier"),
+            ("optional_parameter_declaration", "identifier"),
+            ("type_parameter_declaration", "type_identifier"),
+        ],
+    ]
+
+
+def test_a_concept_is_a_definition_in_its_template() -> None:
+    document = CppDocument.parse("template <typename T> concept Small = sizeof(T) < 4;\n")
+    concept = document.nodes("concept_definition")[0]
+    assert (concept.parent.kind, concept.child_by_field("value").text) == (
+        "template_declaration",
+        "sizeof(T) < 4",
+    )
+
+
+@pytest.mark.parametrize(
+    ("statements", "kinds"),
+    [
+        pytest.param(
+            "if (a) x = 1; else y = 2; z = 3;", ["if_statement", "expression_statement"], id="else"
+        ),
+        pytest.param(
+            "while (a) if (b) f(); else g(); h();",
+            ["while_statement", "expression_statement"],
+            id="if-inside-while",
+        ),
+        pytest.param(
+            "if (a) for (;;) f(); else g(); h();",
+            ["if_statement", "expression_statement"],
+            id="else-after-for",
+        ),
+        pytest.param(
+            "do f(); while (a); g();", ["do_statement", "expression_statement"], id="do-while"
+        ),
+        pytest.param(
+            "while (b) do f(); while (a); g();",
+            ["while_statement", "expression_statement"],
+            id="do-inside-while",
+        ),
+    ],
+)
+def test_a_control_statement_ends_with_its_last_body(statements: str, kinds: list[str]) -> None:
+    function = CppDocument.parse(f"void f() {{ {statements} }}\n").nodes("function_definition")[0]
+    body = function.child_by_field("body")
+    assert isinstance(body, SyntaxNode)
+    assert [node.kind for node in body.named_children] == kinds
+
+
+def test_a_do_statement_gives_its_body_and_condition() -> None:
+    document = CppDocument.parse("void f() { do { g(); } while (x && y); }\n")
+    statement = document.nodes("do_statement")[0]
+    assert (
+        statement.child_by_field("body").text,
+        statement.child_by_field("condition").text,
+    ) == ("{ g(); }", "x && y")
+
+
+def test_the_semicolon_after_a_class_is_no_statement() -> None:
+    root = CppDocument.parse("class A {}; int x;\n").root
+    assert [node.kind for node in root.named_children] == ["class_specifier", "declaration"]
+
+
+def test_a_byte_order_mark_keeps_the_first_directive() -> None:
+    includes = CppDocument.parse(b'\xef\xbb\xbf#include "a.h"\n').include_views()
+    assert [view.header for view in includes] == ["a.h"]
 
 
 @pytest.mark.parametrize(
@@ -309,6 +475,7 @@ def test_case_labels_are_units_of_their_own() -> None:
         ("case_label", "default:"),
         ("return_statement", "return Code::ERR;"),
     ]
+    assert body.named_children[0].child_by_field("value").text == "1"
 
 
 def test_an_anonymous_enum_is_a_declaration() -> None:

@@ -140,20 +140,6 @@ class SyntaxNode(SyntaxElement):
         return self.green.named
 
     @property
-    def missing(self) -> bool:
-        """判断该节点是否由 parser 错误恢复过程合成。
-        Report whether parser recovery synthesized this element.
-        """
-        return self.green.missing
-
-    @property
-    def error(self) -> bool:
-        """判断该节点是否被标记为 parser error recovery。
-        Report whether this element is marked as parser error recovery.
-        """
-        return self.green.error
-
-    @property
     def children(self) -> tuple[SyntaxElement, ...]:
         """物化所有 red child，并按 green child 宽度推导绝对字节偏移。
         Materialize red child views and derive their absolute byte offsets in source order.
@@ -300,20 +286,6 @@ class SyntaxToken(SyntaxElement):
         Return the parser's named-versus-anonymous classification.
         """
         return self.green.named
-
-    @property
-    def missing(self) -> bool:
-        """判断该 token 是否由 parser 错误恢复过程合成。
-        Report whether parser recovery synthesized this element.
-        """
-        return self.green.missing
-
-    @property
-    def error(self) -> bool:
-        """判断该 token 是否被标记为 parser error recovery。
-        Report whether this element is marked as parser error recovery.
-        """
-        return self.green.error
 
 
 class SyntaxTrivia(SyntaxElement):

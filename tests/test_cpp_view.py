@@ -61,13 +61,38 @@ def test_template_parameters_give_names_types_and_defaults() -> None:
     ]
 
 
-def test_deleted_constructors_are_not_callable() -> None:
+@pytest.mark.parametrize("deleted", ["= delete", "=delete"])
+def test_deleted_constructors_are_not_callable(deleted: str) -> None:
     source = (
-        "class C { public: C(int); C(const C&) = delete; "
+        f"class C {{ public: C(int); C(const C&) {deleted}; "
         "C& operator=(const C&) = delete; ~C() = default; };"
     )
     assert _constructors(source, "C", public_only=True) == [["int"], ["const C&"]]
     assert _constructors(source, "C", public_only=True, callable_only=True) == [["int"]]
+
+
+@pytest.mark.parametrize(
+    ("source", "public", "every"),
+    [
+        pytest.param(
+            "struct S { S(int); private: S(float); };",
+            [["int"]],
+            [["int"], ["float"]],
+            id="struct",
+        ),
+        pytest.param(
+            "class S { S(int); public: S(float); };",
+            [["float"]],
+            [["int"], ["float"]],
+            id="class",
+        ),
+    ],
+)
+def test_members_before_an_access_label_have_the_default_access(
+    source: str, public: list[list[str]], every: list[list[str]]
+) -> None:
+    assert _constructors(source, "S", public_only=True) == public
+    assert _constructors(source, "S") == every
 
 
 def test_member_functions_give_their_access_and_whether_deleted() -> None:
@@ -82,15 +107,6 @@ def test_member_functions_give_their_access_and_whether_deleted() -> None:
         ("~C", "public", False),
         ("Run", "private", False),
     ]
-
-
-def test_constructor_declarations_with_defaults_are_not_calls() -> None:
-    source = "class Foo { public: Foo(int count = 10); Foo(float gain = 1.0f); };"
-    assert _constructors(source, "Foo", public_only=True) == [
-        ["int count = 10"],
-        ["float gain = 1.0f"],
-    ]
-    assert CppDocument.parse(source).nodes("call_expression") == ()
 
 
 def test_parameter_types_keep_template_argument_commas() -> None:
@@ -136,9 +152,11 @@ def test_an_out_of_line_nested_class_keeps_its_qualified_name() -> None:
 
 def test_include_views_give_the_header_and_its_form() -> None:
     includes = CppDocument.parse('#include "local.hpp"\n#include <vector>\n').include_views()
-    assert [(item.header, item.system) for item in includes] == [
-        ("local.hpp", False),
-        ("vector", True),
+    assert [
+        (item.header, item.system, item.node.child_by_field("path").kind) for item in includes
+    ] == [
+        ("local.hpp", False, "string_literal"),
+        ("vector", True, "system_lib_string"),
     ]
 
 
@@ -159,6 +177,8 @@ def test_an_access_label_may_hold_spaces_and_comments(label: str) -> None:
         ),
         pytest.param("void", [], id="void"),
         pytest.param("int (&arr)[3]", ["int (&arr)[3]"], id="array-reference"),
+        pytest.param("int a,int b", ["int a", "int b"], id="no-space"),
+        pytest.param("std::array<int, 2> a", ["std::array<int, 2> a"], id="literal-in-template"),
     ],
 )
 def test_constructor_parameters_are_split_at_top_level_commas(
@@ -172,6 +192,16 @@ def test_parameter_text_has_no_surrounding_whitespace() -> None:
     source = "class C { public: C( int a,  char* b ) {} };"
     constructor = CppDocument.parse(source).class_views("C")[0].constructors()[0]
     assert [parameter.text for parameter in constructor.parameters] == ["int a", "char* b"]
+
+
+def test_parameter_names_follow_qualified_types() -> None:
+    source = "class C { public: C(std::string name, ::Foo f, std::vector<int>); };"
+    constructor = CppDocument.parse(source).class_views("C")[0].constructors()[0]
+    assert [(parameter.name, parameter.type) for parameter in constructor.parameters] == [
+        ("name", "std::string"),
+        ("f", "::Foo"),
+        (None, "std::vector<int>"),
+    ]
 
 
 def test_unnamed_parameters_have_no_name_and_the_whole_type() -> None:
@@ -197,6 +227,14 @@ def test_unnamed_parameters_have_no_name_and_the_whole_type() -> None:
             "template <bool B = (1 > 2), typename T = int> class X {};",
             ["(1 > 2)", "int"],
             id="greater-in-parens",
+        ),
+        pytest.param(
+            "template<typename T = A<int>> class X {};", ["A<int>"], id="closing-shift-no-space"
+        ),
+        pytest.param(
+            "template <typename T = A<B<C<int>>>> class X {};",
+            ["A<B<C<int>>>"],
+            id="two-closing-shifts",
         ),
     ],
 )

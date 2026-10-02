@@ -16,41 +16,19 @@ def field_text(node: SyntaxNode, field: str) -> str | None:
 
 
 def declaration_name_element(node: SyntaxNode) -> SyntaxElement | None:
-    """从声明节点中递归定位代表声明名称的语法元素。
-    Locate the syntax element that spells a declaration or function name.
+    """函数或参数名称的语法元素；带括号的名字 (isinf) 取括号里的名字。
+    The syntax element of a function or parameter name; for a parenthesized name (isinf), the
+    name inside the parentheses.
+
+    名字是函数声明子的 declarator 字段，没有函数声明子时是节点自己的 declarator 字段。
+    The name is the declarator field of the function declarator, or of the node itself without
+    one.
     """
     function = find_function_declarator(node)
-    current = (
-        function.child_by_field("declarator")
-        if function is not None
-        else node.child_by_field("declarator")
-    )
-
-    while isinstance(current, SyntaxNode):
-        if current.kind in {"destructor_name", "operator_name"}:
-            return current
-        direct = current.child_by_field("declarator")
-        if direct is not None:
-            if isinstance(direct, SyntaxNode) and direct.kind in {
-                "destructor_name",
-                "operator_name",
-            }:
-                return direct
-            current = direct
-            continue
-        for kind in (
-            "identifier",
-            "field_identifier",
-            "type_identifier",
-            "operator_name",
-            "destructor_name",
-        ):
-            found = current.first_descendant(kind)
-            if found is not None:
-                return found
-        break
-
-    return current
+    name = (function if function is not None else node).child_by_field("declarator")
+    if isinstance(name, SyntaxNode) and name.kind == "parenthesized_declarator":
+        return name.child_by_field("declarator")
+    return name
 
 
 def declaration_name(node: SyntaxNode) -> str | None:

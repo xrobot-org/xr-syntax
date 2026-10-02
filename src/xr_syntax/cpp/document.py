@@ -76,23 +76,13 @@ class CppDocument(SyntaxDocument):
         self._lexed = lexed
 
     @classmethod
-    def parse(
-        cls,
-        source: str | bytes,
-        *,
-        source_name: str | None = None,
-        parser: CppParser | None = None,
-    ) -> CppDocument:
-        """使用 xr-syntax 原生 C++ parser 解析源码并保留 source_name。
-        Parse C++ source with the validated default parser while preserving source identity.
+    def parse(cls, source: str | bytes, *, source_name: str | None = None) -> CppDocument:
+        """解析源码，得到文档；source_name 记录在语法树上，词法结果留给词法查询复用。
+        Parse source into a document; source_name is recorded on the syntax tree, and the lexing
+        result is kept for the lexical queries to reuse.
         """
-        selected = parser or CppParser()
-        # 重写了 parse 的解析器照常调用；词法结果在首次用到时重新切分。
-        # A parser that overrides parse is called as usual; the source is lexed on first use.
-        if type(selected).parse is not CppParser.parse:
-            return cls(selected.parse(source, source_name=source_name), selected)
         tree, lexed = parse_with_lexing(source, source_name)
-        return cls(tree, selected, lexed)
+        return cls(tree, CppParser(), lexed)
 
     def _lexing(self) -> Lexed:
         """文档源码的词法结果（lexeme 和 lexer 诊断）。

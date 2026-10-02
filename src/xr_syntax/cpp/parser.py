@@ -388,32 +388,43 @@ class _StructuralParser(DeclarationMixin, ExpressionMixin, DeclaratorMixin, Rang
         Find the end of a control-flow statement without treating body semicolons as the outer
         terminator.
 
-        不带花括号的嵌套控制语句和 else if 链用栈迭代处理，链再长也不会递归；栈里记录每层是否是
-        if，结束时从最内层起为 if 配上后面的 else，悬空的 else 因此归最近的 if。
+        不带花括号的嵌套控制语句和 else if 链用栈迭代处理，链再长也不会递归；栈里记录每层的关键字，
+        结束时从最内层起为 if 配上后面的 else、为 do 接上后面的 while (...);，悬空的 else 因此归最近
+        的 if。
         Unbraced nested control statements and else-if chains are handled iteratively with a
-        stack, so no chain length recurses; the stack records whether each level is an if, and on
-        the way out each if from the innermost on takes a following else, so a dangling else
-        belongs to the nearest if.
+        stack, so no chain length recurses; the stack records the keyword of each level, and on
+        the way out each if from the innermost on takes a following else and each do its
+        following while (...);, so a dangling else belongs to the nearest if.
         """
         texts = self._texts
         pairs = self._pairs
-        pending: list[bool] = []
+        pending: list[str] = []
         cursor = start
         while True:
+            keyword = texts[cursor]
             after = cursor + 1
             open_paren = self._next_significant(after, end)
-            if open_paren is not None and texts[open_paren] == "(" and open_paren in pairs:
+            if (
+                keyword != "do"
+                and open_paren is not None
+                and texts[open_paren] == "("
+                and open_paren in pairs
+            ):
                 after = pairs[open_paren] + 1
             body = self._next_significant(after, end)
             if body is None:
                 return end
-            pending.append(texts[cursor] == "if")
+            pending.append(keyword)
             if texts[body] in _CONTROL_OR_DO:
                 cursor = body
                 continue
             result = self._body_end(body, end)
             while pending:
-                if not pending.pop():
+                keyword = pending.pop()
+                if keyword == "do":
+                    result = self._do_tail_end(result, end)
+                    continue
+                if keyword != "if":
                     continue
                 else_index = self._next_significant(result, end)
                 if else_index is None or texts[else_index] != "else":
@@ -427,6 +438,22 @@ class _StructuralParser(DeclarationMixin, ExpressionMixin, DeclaratorMixin, Rang
                 result = self._body_end(else_body, end)
             else:
                 return result
+
+    def _do_tail_end(self, body_end: int, end: int) -> int:
+        """do 语句的 body 之后 while (...); 结束的位置；后面不是 while 时就是 body_end。
+        Where the while (...); after the body of a do statement ends; body_end when no while
+        follows.
+        """
+        texts = self._texts
+        keyword = self._next_significant(body_end, end)
+        if keyword is None or texts[keyword] != "while":
+            return body_end
+        open_paren = self._next_significant(keyword + 1, end)
+        if open_paren is None or texts[open_paren] != "(" or open_paren not in self._pairs:
+            return body_end
+        close = self._pairs[open_paren]
+        semicolon = self._next_significant(close + 1, end)
+        return semicolon + 1 if semicolon is not None and texts[semicolon] == ";" else close + 1
 
     def _body_end(self, body: int, end: int) -> int:
         """不是控制语句的 body 结束的位置：花括号块到右括号之后，其他语句到其末尾。

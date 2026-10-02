@@ -23,11 +23,16 @@ def test_invocations_keep_template_commas_and_skip_comments_and_directives() -> 
     ]
 
 
-def test_angles_inside_parentheses_do_not_nest_a_source_list() -> None:
-    assert split_source_list("A<(1 > 2), int>, x", template_angles=True) == (
-        "A<(1 > 2), int>",
-        "x",
-    )
+@pytest.mark.parametrize(
+    ("source", "items"),
+    [
+        pytest.param("A<(1 > 2), int>, x", ("A<(1 > 2), int>", "x"), id="angles-in-parentheses"),
+        pytest.param("a /* , */, b", ("a /* , */", "b"), id="comma-in-a-comment"),
+        pytest.param("a,b", ("a", "b"), id="no-space"),
+    ],
+)
+def test_a_source_list_splits_at_top_level_commas(source: str, items: tuple[str, ...]) -> None:
+    assert split_source_list(source, template_angles=True) == items
 
 
 def test_a_source_list_with_an_unclosed_template_is_refused() -> None:
@@ -40,7 +45,9 @@ def test_identifier_occurrences_skip_literals_comments_and_directives() -> None:
         "#define USE(x) x \\\n  dev\n"
         'f(dev, obj.dev, ptr->dev, ns::dev, dev::constant, "dev"); // dev\n'
     )
-    items = [item for item in identifier_occurrences(source) if item.text == "dev"]
+    items = identifier_occurrences(source)
+    assert {item.text for item in items} == {"f", "dev", "obj", "ptr", "ns", "constant"}
+    items = [item for item in items if item.text == "dev"]
     assert [(item.previous, item.following) for item in items] == [
         ("(", ","),
         (".", ","),
@@ -48,3 +55,10 @@ def test_identifier_occurrences_skip_literals_comments_and_directives() -> None:
         ("::", ","),
         (",", "::"),
     ]
+
+
+def test_identifier_occurrences_give_byte_spans_and_neighbours() -> None:
+    assert [
+        (item.text, item.span.start, item.span.end, item.previous, item.following)
+        for item in identifier_occurrences("é = y")
+    ] == [("é", 0, 2, None, "="), ("y", 5, 6, "=", None)]

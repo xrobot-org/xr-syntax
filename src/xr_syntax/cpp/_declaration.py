@@ -8,7 +8,7 @@ from xr_syntax.core import GreenElement, GreenNode
 from xr_syntax.core.green import green_token
 from xr_syntax.cpp._declarator import TYPE_KEYWORDS
 from xr_syntax.cpp._support import ParserSupport, Replacement
-from xr_syntax.cpp.lexer import CONTROL, STORAGE, TYPE_WORDS
+from xr_syntax.cpp.lexer import CONTROL, STORAGE
 
 # 函数声明子 ) 之后仍属于 declarator 的修饰词。
 # Words after the ) of a function declarator that still belong to the declarator.
@@ -230,7 +230,9 @@ class DeclarationMixin(ParserSupport):
         replacements: list[Replacement] = []
         if name is not None:
             text = self._texts[name]
-            name_kind = "type_identifier" if template and text not in TYPE_WORDS else "identifier"
+            name_kind = (
+                "type_identifier" if template and first in ("typename", "class") else "identifier"
+            )
             replacements.append((name, name + 1, green_token(name_kind, text, True), "declarator"))
         if equal is not None:
             value_start = self._next_significant(equal + 1, end)

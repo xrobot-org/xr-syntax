@@ -103,7 +103,7 @@ class DeclaratorMixin(ParserSupport):
         while position < high:
             text = stext[position]
             if text == "operator" and not angles:
-                return self._operator_parameter_list(position, high, end)
+                return self._operator_parameter_list(start, position, high, end)
             if text == "(":
                 index = sig[position]
                 close = pairs.get(index)
@@ -126,7 +126,7 @@ class DeclaratorMixin(ParserSupport):
         return None
 
     def _operator_parameter_list(
-        self, position: int, high: int, end: int
+        self, start: int, position: int, high: int, end: int
     ) -> tuple[int, int, int, int] | None:
         """operator 函数的参数列表和名字：名字从 operator 到参数列表的 ( 之前。
         The parameter list and the name of an operator function: the name runs from operator to
@@ -150,12 +150,32 @@ class DeclaratorMixin(ParserSupport):
         close = self._pairs.get(index)
         if close is None or close >= end:
             return None
-        return index, close, sig[position], sig[following - 1] + 1
+        return index, close, self._qualified_start(sig[position], start), sig[following - 1] + 1
+
+    def _qualified_start(self, first: int, start: int) -> int:
+        """名字 first 前面 Foo:: 限定（可以有多层）的起点；没有限定时就是 first。
+        Where the Foo:: qualification (possibly several levels) before the name first starts;
+        first itself without one.
+        """
+        texts = self._texts
+        while True:
+            separator = self._previous_significant(first - 1, start)
+            if separator is None or texts[separator] != "::":
+                return first
+            qualifier = self._previous_significant(separator - 1, start)
+            if (
+                qualifier is None
+                or self._infos[qualifier][0] != "identifier"
+                or texts[qualifier] in TYPE_WORDS
+            ):
+                return first
+            first = qualifier
 
     def _function_name_range(self, start: int, end: int) -> tuple[int, int] | None:
-        """紧挨 end 之前的函数名或析构函数名的源码范围；不像函数名时返回 None。
-        The source range of the function or destructor name right before end; None when it does
-        not look like a function name.
+        """end 之前的函数名或析构函数名的范围，含类外定义的 Foo:: 限定；不像函数名时返回 None。
+        The source range of the function or destructor name right before end, with the Foo::
+        qualification of an out-of-class definition; None when it does not look like a function
+        name.
         """
         last = self._previous_significant(end - 1, start)
         if last is not None and self._texts[last] == ")":
@@ -179,14 +199,13 @@ class DeclaratorMixin(ParserSupport):
         if text in TYPE_WORDS or text in CONTROL or text in _NOT_FUNCTION_NAMES:
             return None
         before = self._previous_significant(last - 1, start)
-        if before is not None and self._texts[before] == "~":
-            return before, last + 1
-        return last, last + 1
+        first = before if before is not None and self._texts[before] == "~" else last
+        return self._qualified_start(first, start), last + 1
 
     def _name_element(self, start: int, end: int) -> GreenElement:
-        """函数名范围的语法元素：普通名字、析构函数名、运算符函数名或带括号的名字。
+        """函数名范围的语法元素：普通名字、析构函数名、运算符函数名、限定名或带括号的名字。
         The syntax element of a function name range: an identifier, destructor_name,
-        operator_name or parenthesized_declarator.
+        operator_name, qualified_identifier or parenthesized_declarator.
         """
         if self._texts[start] == "(":
             inner = self._next_significant(start + 1, end)
@@ -195,6 +214,8 @@ class DeclaratorMixin(ParserSupport):
             return self._compose(
                 "parenthesized_declarator", start, end, [(inner, inner + 1, name, "declarator")]
             )
+        if "::" in self._texts[start:end]:
+            return self._compose("qualified_identifier", start, end, [])
         stripped = self._text(start, end).strip()
         if stripped.startswith("operator") or stripped.startswith("~"):
             kind = "operator_name" if stripped.startswith("operator") else "destructor_name"
@@ -214,7 +235,7 @@ class DeclaratorMixin(ParserSupport):
         """区分函数声明和 `Type object(args);` 直接初始化。
         Distinguish a function declaration from direct object initialization.
         """
-        name_text = self._text(name_start, open_paren).strip()
+        name_text = self._text(name_start, open_paren).strip().rsplit("::", 1)[-1]
         if name_text.startswith("operator"):
             return True
         if context == "class" and name_text.startswith("~"):
@@ -556,7 +577,9 @@ class DeclaratorMixin(ParserSupport):
             position += 1
         if position >= high:
             return None
-        return self._sig[position], name_start
+        last = self._previous_significant(name_start - 1, start)
+        assert last is not None
+        return self._sig[position], last + 1
 
     def _special_member_clause(self, start: int, end: int) -> Replacement | None:
         """识别 `= delete` / `= default` 子句。

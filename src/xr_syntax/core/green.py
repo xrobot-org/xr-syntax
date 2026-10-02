@@ -68,8 +68,6 @@ class GreenToken(_GreenMixin):
     kind: str
     text: str
     named: bool = False
-    missing: bool = False
-    error: bool = False
 
     def render(self) -> str:
         """原样返回该 token 所保存的源码文本。
@@ -114,8 +112,6 @@ class GreenNode(_GreenMixin):
     kind: str
     children: tuple[GreenChild, ...]
     named: bool = True
-    missing: bool = False
-    error: bool = False
 
     def render(self) -> str:
         """按 children 顺序拼接并渲染当前节点代表的完整源码。
@@ -164,8 +160,6 @@ def green_token(kind: str, text: str, named: bool) -> GreenToken:
     fields["kind"] = kind
     fields["text"] = text
     fields["named"] = named
-    fields["missing"] = False
-    fields["error"] = False
     return element
 
 
@@ -203,8 +197,6 @@ def green_node(
     fields["kind"] = kind
     fields["children"] = children
     fields["named"] = True
-    fields["missing"] = False
-    fields["error"] = False
     if byte_width is not None:
         # 写进 cached_property 的缓存位置。
         # Stored where the cached_property keeps its value.

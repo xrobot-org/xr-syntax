@@ -93,13 +93,13 @@ def canonical(path: str) -> str:
     while stack:
         element, field, depth = stack.pop()
         if isinstance(element, GreenNode):
-            flags = f"{element.named:d}{element.missing:d}{element.error:d}"
+            flags = f"{element.named:d}"
             lines.append(f"{depth} node {element.kind} {flags} {field}")
             stack.extend(
                 (child.element, child.field, depth + 1) for child in reversed(element.children)
             )
         elif isinstance(element, GreenToken):
-            flags = f"{element.named:d}{element.missing:d}{element.error:d}"
+            flags = f"{element.named:d}"
             lines.append(f"{depth} token {element.kind} {flags} {field} {element.text!r}")
         else:
             lines.append(f"{depth} trivia {element.kind} {field} {element.text!r}")  # type: ignore[attr-defined]

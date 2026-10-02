@@ -1,6 +1,6 @@
-"""测试 C++ 文档：include 与类查询、复用解析时的词法结果、User Code 区域及其替换。
-Tests of the C++ document: include and class queries, reuse of the lexing of the parse, and
-User Code regions and their replacement.
+"""测试 C++ 文档：复用解析时的词法结果、User Code 区域及其替换。
+Tests of the C++ document: reuse of the lexing of the parse, and User Code regions and their
+replacement.
 """
 
 from __future__ import annotations
@@ -27,24 +27,22 @@ def _region_source(newline: str = "\n") -> str:
     )
 
 
-def test_include_and_class_views_list_the_file_contents() -> None:
-    source = '#include "foo.hpp"\nclass Device { public: Device(int value); };\nstruct Pin {};\n'
+@pytest.mark.parametrize("edited", [False, True], ids=["parsed", "edited"])
+def test_tokens_and_identifiers_equal_those_of_lexing_the_source_again(edited: bool) -> None:
+    source = (
+        '#define A 1\nint /* é */ value = f("x");\n/* User Code Begin a */\n/* User Code End a */\n'
+    )
     document = CppDocument.parse(source)
-    assert [view.header for view in document.include_views()] == ["foo.hpp"]
-    assert [view.name for view in document.class_views()] == ["Device", "Pin"]
-    assert [view.name for view in document.class_views("Pin")] == ["Pin"]
+    if edited:
+        document = document.replace_region_body(document.user_regions()[0], "\nint b;\n")
+    assert document.code_tokens() == code_tokens(document.render())
+    assert document.identifier_occurrences() == identifier_occurrences(document.render())
 
 
-def test_tokens_and_identifiers_equal_those_of_lexing_the_source_again() -> None:
-    source = '#define A 1\nint /* é */ value = f("x");\n'
-    document = CppDocument.parse(source)
-    assert document.code_tokens() == code_tokens(source)
-    assert document.identifier_occurrences() == identifier_occurrences(source)
-
-
-def test_tokens_of_a_source_with_a_lexical_error_are_refused() -> None:
+@pytest.mark.parametrize("comment", ["/* open", "/*/"])
+def test_tokens_of_a_source_with_a_lexical_error_are_refused(comment: str) -> None:
     with pytest.raises(ValueError, match="^unclosed block comment$"):
-        CppDocument.parse("int x; /* open").code_tokens()
+        CppDocument.parse(f"int x; {comment}").code_tokens()
 
 
 def test_a_user_region_gives_its_name_and_body() -> None:
@@ -56,18 +54,14 @@ def test_a_user_region_gives_its_name_and_body() -> None:
     )
 
 
-def test_replacing_a_region_body_keeps_the_markers_and_the_rest() -> None:
-    document = CppDocument.parse(_region_source())
-    changed = document.replace_region_body(document.user_regions()[0], "\n  generated();\n  ")
-    assert changed.render() == _region_source().replace("keep_me", "generated")
-    assert [region.body_text for region in changed.user_regions()] == ["\n  generated();\n  "]
-
-
-def test_replacing_a_region_body_keeps_crlf_line_ends() -> None:
-    source = _region_source("\r\n")
+@pytest.mark.parametrize("newline", ["\n", "\r\n"], ids=["lf", "crlf"])
+def test_replacing_a_region_body_keeps_the_markers_and_the_rest(newline: str) -> None:
+    source = _region_source(newline)
     document = CppDocument.parse(source)
-    changed = document.replace_region_body(document.user_regions()[0], "\r\n  generated();\r\n  ")
+    body = f"{newline}  generated();{newline}  "
+    changed = document.replace_region_body(document.user_regions()[0], body)
     assert changed.render_bytes() == source.replace("keep_me", "generated").encode()
+    assert [region.body_text for region in changed.user_regions()] == [body]
 
 
 def test_writing_back_a_body_keeps_non_utf8_bytes() -> None:
