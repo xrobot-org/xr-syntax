@@ -136,13 +136,32 @@ def test_nesting_as_deep_as_real_code_is_fully_structured() -> None:
     assert document.diagnostics == ()
 
 
+# 源码有数万个字符，需要显式的 id：pytest 把测试 id 写进环境变量，Windows 上限 32767 个字符。
+# The sources are tens of thousands of characters long and need explicit ids: pytest writes the
+# test id into an environment variable, limited to 32767 characters on Windows.
 @pytest.mark.parametrize(
     ("kind", "source"),
     [
-        ("call_expression", "int x = " + "f(" * 3000 + "0" + ")" * 3000 + ";\n"),
-        ("if_statement", "void f() " + "{ if (a) " * 3000 + "x = 1;" + " }" * 3000 + "\n"),
-        ("parenthesized_expression", "int x = " + "(" * 3000 + "1" + ")" * 3000 + ";\n"),
-        ("lambda_expression", "auto x = " + "[]{ return " * 3000 + "1" + "; }()" * 3000 + ";\n"),
+        pytest.param(
+            "call_expression",
+            "int x = " + "f(" * 3000 + "0" + ")" * 3000 + ";\n",
+            id="call_expression",
+        ),
+        pytest.param(
+            "if_statement",
+            "void f() " + "{ if (a) " * 3000 + "x = 1;" + " }" * 3000 + "\n",
+            id="if_statement",
+        ),
+        pytest.param(
+            "parenthesized_expression",
+            "int x = " + "(" * 3000 + "1" + ")" * 3000 + ";\n",
+            id="parenthesized_expression",
+        ),
+        pytest.param(
+            "lambda_expression",
+            "auto x = " + "[]{ return " * 3000 + "1" + "; }()" * 3000 + ";\n",
+            id="lambda_expression",
+        ),
     ],
 )
 def test_nesting_past_the_limit_stays_source_with_a_diagnostic(kind: str, source: str) -> None:
