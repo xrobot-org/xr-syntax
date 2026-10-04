@@ -2,7 +2,7 @@
 
 C++ 源码的无损解析与结构查询 / Lossless parsing and structural queries of C++ source
 
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](https://github.com/xrobot-org/xr-syntax/blob/master/LICENSE)
 [![PyPI](https://img.shields.io/pypi/v/xr-syntax)](https://pypi.org/project/xr-syntax/)
 [![GitHub Repo](https://img.shields.io/github/stars/xrobot-org/xr-syntax?style=social)](https://github.com/xrobot-org/xr-syntax)
 [![GitHub Issues](https://img.shields.io/github/issues/xrobot-org/xr-syntax)](https://github.com/xrobot-org/xr-syntax/issues)
@@ -141,10 +141,11 @@ function_definition 317 extern "C" void app_main(void) {
 True
 ```
 
-不完整的源码同样得到语法树，问题记录在 `diagnostics` 中，行号和列号从 0 开始：
+不完整的源码同样得到语法树，问题记录在 `diagnostics` 中，行号和列号从 0 开始（以下为英文环境
+`XR_LANG=en` 的输出）：
 
 Incomplete source gets a syntax tree too; the problems are recorded in `diagnostics`, with rows and
-columns counted from 0:
+columns counted from 0 (output with `XR_LANG=en`):
 
 ```python
 broken = CppDocument.parse("void f() {\n  call(1,\n}\n")
@@ -216,12 +217,14 @@ log ; (
 ## 🌐 输出语言 / Output Language
 
 `xrobot` 和 `libxr` 两个命令行工具用 `xr_syntax.i18n` 选择输出语言：环境变量 `XR_LANG`、`LANGUAGE`、
-`LC_ALL`、`LC_MESSAGES`、`LANG` 中第一个非空的值以 `zh` 开头时输出中文，否则输出英文。
+`LC_ALL`、`LC_MESSAGES`、`LANG` 中第一个非空的值以 `zh` 开头时输出中文，否则输出英文；这些变量都未设置时，
+Windows 上按系统界面语言选择。
 `localize_argparse()` 让 argparse 自带的用法、标题和错误信息随之切换，含中文的帮助文字按终端列宽折行。
 
 The `xrobot` and `libxr` command-line tools choose their output language with `xr_syntax.i18n`:
 when the first non-empty of the environment variables `XR_LANG`, `LANGUAGE`, `LC_ALL`,
-`LC_MESSAGES` and `LANG` starts with `zh`, the output is Chinese, otherwise English.
+`LC_MESSAGES` and `LANG` starts with `zh`, the output is Chinese, otherwise English; when none of
+them is set, Windows follows the system display language.
 `localize_argparse()` makes argparse's own usage, headings and error messages follow, and wraps help
 text holding Chinese by terminal column width.
 
@@ -244,10 +247,13 @@ $ XR_LANG=zh python -c 'from xr_syntax.i18n import tr; print(tr("parse failed", 
 | `code_tokens()`、`identifier_occurrences()`、`split_source_list()`、`matching_delimiter()` | 词法查询 | Lexical queries |
 | `xr_syntax.i18n`：`tr()`、`chinese()`、`localize_argparse()` | 输出语言 | Output language |
 
-设计见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)，验证数据见 [docs/VALIDATION.md](docs/VALIDATION.md)。
+设计见 [docs/ARCHITECTURE.md](https://github.com/xrobot-org/xr-syntax/blob/master/docs/ARCHITECTURE.md)，
+验证数据见 [docs/VALIDATION.md](https://github.com/xrobot-org/xr-syntax/blob/master/docs/VALIDATION.md)。
 
-The design is described in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), the validation in
-[docs/VALIDATION.md](docs/VALIDATION.md).
+The design is described in
+[docs/ARCHITECTURE.md](https://github.com/xrobot-org/xr-syntax/blob/master/docs/ARCHITECTURE.md),
+the validation in
+[docs/VALIDATION.md](https://github.com/xrobot-org/xr-syntax/blob/master/docs/VALIDATION.md).
 
 ---
 
