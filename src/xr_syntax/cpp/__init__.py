@@ -1,7 +1,8 @@
-"""C++ 前端：解析器、文档、查询视图和词法工具。
-C++ frontend: the parser, documents, query views and lexical helpers.
+"""C++ 前端：解析器、文档、查询视图、词法工具和文件构建器。
+C++ frontend: the parser, documents, query views, lexical helpers and the file builder.
 """
 
+from xr_syntax.cpp.builder import CppFileBuilder
 from xr_syntax.cpp.document import CppDocument, CppRegion
 from xr_syntax.cpp.invocation import (
     CppIdentifierOccurrence,
@@ -22,6 +23,7 @@ from xr_syntax.cpp.view import (
 __all__ = [
     "CppClassView",
     "CppDocument",
+    "CppFileBuilder",
     "CppFunctionView",
     "CppIdentifierOccurrence",
     "CppIncludeView",
