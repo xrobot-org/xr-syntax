@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "xr-syntax"
-version = "0.2.0"
-description = "Lossless C++ source parsing and structural queries for the XRobot tools."
+version = "0.3.0"
+description = "Lossless C++ and CMake parsing, editing and generated-code layout for the XRobot tools."
 requires-python = ">=3.10"
 authors = [
     {name = "Xiao", email = "2592509183@qq.com"}
@@ -16,7 +16,7 @@ maintainers = [
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-keywords = ["C++", "parser", "syntax tree", "lexer", "XRobot"]
+keywords = ["C++", "CMake", "source transformation", "code generation", "XRobot"]
 dependencies = []
 
 classifiers = [
