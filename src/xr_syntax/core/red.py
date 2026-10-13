@@ -111,6 +111,16 @@ class SyntaxElement:
         """
         return isinstance(self._green, GreenTrivia)
 
+    @property
+    def path(self) -> tuple[int, ...]:
+        """该元素在当前快照内的结构路径（各级父节点上的 child 下标）；根节点为 ()。
+        The structural path of this element inside the current snapshot, as the child index at
+        every level; the root has ().
+        """
+        if self._parent is None:
+            return ()
+        return self._parent.path + (self._index,)
+
     def __repr__(self) -> str:
         """返回包含 kind 和 span 的调试字符串。
         Return a debug representation containing the syntax kind and source span.

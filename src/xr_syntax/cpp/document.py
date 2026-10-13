@@ -5,16 +5,13 @@ High-level C++ document queries and protected-region editing helpers.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 
 from xr_syntax.core import (
-    SourceSpan,
+    SourceRegion,
     SyntaxDocument,
-    SyntaxElement,
     SyntaxNode,
     SyntaxParserProtocol,
     SyntaxTree,
-    encode_source,
 )
 from xr_syntax.cpp.invocation import (
     CppIdentifierOccurrence,
@@ -32,19 +29,15 @@ from xr_syntax.cpp.view import CppClassView, CppIncludeView
 # Protected source regions
 # ---------------------------------------------------------------------------
 
+# 区域的实现与配对规则在 core.document，两种语言共用；这里保留 CppRegion 这个名字。
+# The region implementation and pairing rules live in core.document and are shared by both
+# languages; the name CppRegion is kept here.
+CppRegion = SourceRegion
 
-@dataclass(frozen=True)
-class CppRegion:
-    """表示由成对标记界定的源码保护区域，例如 User Code、clang-format 或 NOLINT。
-    Paired source-marker region such as User Code, clang-format or NOLINT.
-    """
-
-    kind: str
-    name: str | None
-    begin: SyntaxElement
-    end: SyntaxElement
-    body_span: SourceSpan
-    body_text: str
+# C++ 的 User Code 标记：区分大小写，与 STM32CubeMX 写出的一致。
+# The C++ User Code markers: case-sensitive, as STM32CubeMX writes them.
+_USER_BEGIN = re.compile(r"/\*\s*User Code Begin(?:\s+(.+?))?\s*\*/")
+_USER_END = re.compile(r"/\*\s*User Code End(?:\s+(.+?))?\s*\*/")
 
 
 # ---------------------------------------------------------------------------
@@ -76,13 +69,26 @@ class CppDocument(SyntaxDocument):
         self._lexed = lexed
 
     @classmethod
-    def parse(cls, source: str | bytes, *, source_name: str | None = None) -> CppDocument:
+    def parse(
+        cls,
+        source: str | bytes,
+        *,
+        source_name: str | None = None,
+        parser: CppParser | None = None,
+    ) -> CppDocument:
         """解析源码，得到文档；source_name 记录在语法树上，词法结果留给词法查询复用。
         Parse source into a document; source_name is recorded on the syntax tree, and the lexing
         result is kept for the lexical queries to reuse.
+
+        parser 给出复用的解析器实例（工厂与构建器这样做，避免每次解析都新建一个）；省略时新建。
+        parser reuses one parser instance, as the factory and builders do instead of creating one
+        per parse; without it a new parser is created.
         """
-        tree, lexed = parse_with_lexing(source, source_name)
-        return cls(tree, CppParser(), lexed)
+        if parser is None:
+            tree, lexed = parse_with_lexing(source, source_name)
+            return cls(tree, CppParser(), lexed)
+        tree = parser.parse(source, source_name=source_name)
+        return cls(tree, parser, lex(tree.render()))
 
     def _lexing(self) -> Lexed:
         """文档源码的词法结果（lexeme 和 lexer 诊断）。
@@ -118,28 +124,6 @@ class CppDocument(SyntaxDocument):
             raise ValueError(lexed.diagnostics[0].message)
         return identifier_occurrences_of(lexed)
 
-    def replace_region_body(self, region: CppRegion, body: str) -> CppDocument:
-        """替换当前文档中一个已验证区域的 body。
-        Replace the body of a validated region owned by this document snapshot.
-        """
-        source = self.render_bytes()
-        self._validate_region(region, len(source))
-        replacement = encode_source(body)
-        changed = source[: region.body_span.start] + replacement + source[region.body_span.end :]
-        return self._reparse(changed)
-
-    def _validate_region(self, region: CppRegion, source_size: int) -> None:
-        """确认 region 属于当前快照且 body span 与 marker 一致。
-        Verify region ownership and ensure its body span matches the paired markers.
-        """
-        if region.begin.tree is not self.tree or region.end.tree is not self.tree:
-            raise ValueError("region belongs to a different immutable syntax snapshot")
-        expected = SourceSpan(region.begin.span.end, region.end.span.start)
-        if region.body_span != expected:
-            raise ValueError("region body span does not match its begin/end markers")
-        if region.body_span.end > source_size:
-            raise ValueError("region body span exceeds the current source range")
-
     def include_views(self) -> tuple[CppIncludeView, ...]:
         """按源码顺序返回全部 #include 的视图。
         Views of all #include directives, in source order.
@@ -172,60 +156,11 @@ class CppDocument(SyntaxDocument):
         )
 
     def user_regions(self) -> tuple[CppRegion, ...]:
-        """识别并返回成对的 User Code Begin/End 区域。
-        Find paired STM32-style User Code Begin/End comment regions.
-        """
-        return self._paired_comment_regions(
-            kind="user",
-            begin=re.compile(r"/\*\s*User Code Begin(?:\s+(.+?))?\s*\*/"),
-            end=re.compile(r"/\*\s*User Code End(?:\s+(.+?))?\s*\*/"),
-        )
+        """识别并返回成对的 User Code Begin/End 区域，按源码顺序排列。
+        Find paired STM32-style User Code Begin/End comment regions, in source order.
 
-    # 区域标记由普通 C++ 注释配对得到，实现在 document 层。
-    # Region markers are paired from ordinary C++ comments at the document layer.
-    def _paired_comment_regions(
-        self,
-        *,
-        kind: str,
-        begin: re.Pattern[str],
-        end: re.Pattern[str],
-    ) -> tuple[CppRegion, ...]:
-        """按 begin/end 正则匹配成对注释，并构造带 body span 的区域对象。
-        Pair begin/end comments and construct protected-region objects with body spans.
+        配对与校验语义在 core.document.SyntaxDocument.paired_comment_regions，CMake 侧共用同一套。
+        The pairing and validation semantics are in
+        core.document.SyntaxDocument.paired_comment_regions and are shared with the CMake frontend.
         """
-        source = self.render_bytes()
-        stack: list[tuple[SyntaxElement, str | None]] = []
-        regions: list[CppRegion] = []
-        for comment in self.elements("comment"):
-            begin_match = begin.fullmatch(comment.text.strip())
-            if begin_match:
-                name = begin_match.group(1).strip() if begin_match.lastindex else None
-                stack.append((comment, name))
-                continue
-            end_match = end.fullmatch(comment.text.strip())
-            if not end_match or not stack:
-                continue
-            start, name = stack[-1]
-            end_name = (
-                end_match.group(1).strip()
-                if end_match.lastindex and end_match.group(1) is not None
-                else None
-            )
-            if end_name != name:
-                continue
-            stack.pop()
-            body = SourceSpan(start.span.end, comment.span.start)
-            regions.append(
-                CppRegion(
-                    kind,
-                    name,
-                    start,
-                    comment,
-                    body,
-                    source[body.start : body.end].decode(
-                        "utf-8",
-                        errors="surrogateescape",
-                    ),
-                )
-            )
-        return tuple(sorted(regions, key=lambda region: region.begin.span.start))
+        return self.paired_comment_regions(kind="user", begin=_USER_BEGIN, end=_USER_END)

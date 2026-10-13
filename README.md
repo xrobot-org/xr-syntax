@@ -1,6 +1,7 @@
 # xr-syntax
 
-C++ 源码的无损解析与结构查询 / Lossless parsing and structural queries of C++ source
+C++ 与 CMake 源码的无损解析、结构编辑与生成 / Lossless parsing, structural editing and code
+generation of C++ and CMake source
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](https://github.com/xrobot-org/xr-syntax/blob/master/LICENSE)
 [![PyPI](https://img.shields.io/pypi/v/xr-syntax)](https://pypi.org/project/xr-syntax/)
@@ -9,15 +10,18 @@ C++ 源码的无损解析与结构查询 / Lossless parsing and structural queri
 [![test](https://github.com/xrobot-org/xr-syntax/actions/workflows/test.yml/badge.svg)](https://github.com/xrobot-org/xr-syntax/actions/workflows/test.yml)
 
 xr-syntax 是 [XRobot](https://github.com/xrobot-org/XRobot) 和
-[LibXR_CppCodeGenerator](https://github.com/xrobot-org/LibXR_CppCodeGenerator) 读取 C++ 源码时使用的
-Python 库。它把源码解析为语法树，提供 include、类与构造函数、宏式调用、`User Code` 区域等结构查询；
-语法树逐字节保留源码，输出与输入完全相同。两个工具共用的输出语言设置也在这里。
+[LibXR_CppCodeGenerator](https://github.com/xrobot-org/LibXR_CppCodeGenerator) 读写 C++ 与 CMake 源码
+时使用的 Python 库。它把源码解析为语法树，提供 include、类与构造函数、宏式调用、`User Code` 区域等
+结构查询；按 LibXR 的 clang-format 风格排版生成的代码；并用文件构建器把生成结果拼成整份文件。语法树
+逐字节保留源码，输出与输入完全相同。两个工具共用的输出语言设置也在这里。
 
 xr-syntax is the Python library [XRobot](https://github.com/xrobot-org/XRobot) and
-[LibXR_CppCodeGenerator](https://github.com/xrobot-org/LibXR_CppCodeGenerator) use to read C++
-source. It parses source into a syntax tree and answers structural queries: includes, classes and
-their constructors, macro-style invocations and `User Code` regions. The syntax tree keeps every
-byte, so its output equals its input. The output-language setting both tools share lives here too.
+[LibXR_CppCodeGenerator](https://github.com/xrobot-org/LibXR_CppCodeGenerator) use to read and write
+C++ and CMake source. It parses source into a syntax tree and answers structural queries: includes,
+classes and their constructors, macro-style invocations and `User Code` regions. It lays out
+generated code in the clang-format style of LibXR, and file builders assemble the result into whole
+files. The syntax tree keeps every byte, so its output equals its input. The output-language setting
+both tools share lives here too.
 
 ---
 
@@ -161,6 +165,22 @@ unclosed delimiter SourcePoint(row=1, column=6)
 True
 ```
 
+`SyntaxTree.diagnostics` 解析后是诊断元组；底层结构编辑 `SyntaxTree.replace()` 只重建语法树、
+不重新解析，此时它是 `None`，表示"未验证"——既不能读作"没有问题"，也不能读作"有诊断"。文档层的 `diagnostics` 属性把 `None` 显示为空元组；需要区分这两种情况时读
+`SyntaxTree.diagnostic_state`（`clean`、`diagnosed` 或 `unknown`）。
+
+`SyntaxTree.diagnostics` holds the diagnostics after a parse; the low-level structural edit
+`SyntaxTree.replace()` rebuilds the tree without reparsing, so it is `None` then, meaning "unverified": it must be read neither as "no diagnostics" nor as "has
+diagnostics". The `diagnostics` property of the document shows `None` as an empty tuple; read
+`SyntaxTree.diagnostic_state` (`clean`, `diagnosed` or `unknown`) when the difference matters.
+
+`CppRegion` 现在是 `SourceRegion` 的别名，两者等价；`SourceRegion` 在 `xr_syntax.core` 里，C++ 与
+CMake 共用。判断区域属于哪一门前端读 `begin.tree.language`。
+
+`CppRegion` is now an alias of `SourceRegion` and the two are equivalent; `SourceRegion` lives in
+`xr_syntax.core` and is shared by C++ and CMake. Read `begin.tree.language` to tell which frontend a
+region belongs to.
+
 ---
 
 ## ✏️ User Code 区域 / User Code Regions
@@ -214,6 +234,81 @@ log ; (
 
 ---
 
+## 🧱 CMake / CMake
+
+CMake 前端与 C++ 前端共用同一套语法树、结构化编辑和区域规则。它识别命令、参数（引号、方括号和普通写法）、
+注释，以及 `if`/`foreach`/`while`/`function`/`macro` 到各自结束命令的整块；User Code 区域写作
+`# User Code Begin <name>` 与 `# User Code End <name>`。
+
+The CMake frontend shares one syntax tree, one structural editing model and one region rule set with
+the C++ frontend. It recognizes commands, arguments (quoted, bracketed and plain), comments, and whole
+blocks from `if`/`foreach`/`while`/`function`/`macro` to their end command; a User Code region is
+written `# User Code Begin <name>` and `# User Code End <name>`.
+
+```python
+from xr_syntax.cmake import CMakeDocument
+
+document = CMakeDocument.parse(b'# ---- Project settings ----\nset(LIBXR_SYSTEM None)\n')
+print([(view.name, [item.text for item in view.arguments]) for view in document.command_views()])
+statement = document.top_level_statements()[0]
+changed = document.replace_argument(statement.arguments[1], "FreeRTOS")
+print(changed.render().splitlines()[1])
+```
+
+```text
+[('set', ['LIBXR_SYSTEM', 'None'])]
+set(LIBXR_SYSTEM FreeRTOS)
+```
+
+---
+
+## 🖨️ 排版与生成 / Layout and Generation
+
+`xr_syntax.format` 按 LibXR 的 clang-format 风格（Google、列宽 90、Allman）排版生成的代码，运行时不调用
+clang-format：`layout_statement()` 排版一条语句，`layout_value()`、`layout_declaration()`、`layout_call()`、
+`layout_macro()`、`sort_includes()` 和 `wrap_comment()` 排版值、声明、调用、宏、include 块和注释。测试用固定
+版本的 clang-format 核对输出逐字节相同。
+
+`xr_syntax.format` lays out generated code in the clang-format style of LibXR (Google based, column
+limit 90, Allman) without calling clang-format at run time: `layout_statement()` lays out one
+statement, and `layout_value()`, `layout_declaration()`, `layout_call()`, `layout_macro()`,
+`sort_includes()` and `wrap_comment()` lay out values, declarations, calls, macros, include blocks and
+comments. The tests check the output byte for byte against a pinned clang-format.
+
+`CppFileBuilder` 与 `CMakeFileBuilder` 把生成结果拼成整份文件，`build()` 只解析一次，可以用
+`require_clean=True` 要求生成结果没有解析诊断。
+
+`CppFileBuilder` and `CMakeFileBuilder` assemble the result into a whole file; `build()` parses it
+once, and `require_clean=True` requires the result to have no parse diagnostics.
+
+```python
+from xr_syntax.cmake import CMakeFileBuilder
+from xr_syntax.cpp import CppFileBuilder
+
+cpp = CppFileBuilder(header=True)
+cpp.include("libxr.hpp")
+cpp.raw("")
+cpp.raw("static int blink_period = 250;")
+print(cpp.build(require_clean=True).render())
+
+cmake = CMakeFileBuilder()
+cmake.comment("generated")
+cmake.command("project", ["Demo", "LANGUAGES", "CXX"])
+print(cmake.build(require_clean=True).render())
+```
+
+```text
+#pragma once
+#include "libxr.hpp"
+
+static int blink_period = 250;
+
+# generated
+project(Demo LANGUAGES CXX)
+```
+
+---
+
 ## 🌐 输出语言 / Output Language
 
 `xrobot` 和 `libxr` 两个命令行工具用 `xr_syntax.i18n` 选择输出语言：环境变量 `XR_LANG`、`LANGUAGE`、
@@ -245,6 +340,11 @@ $ XR_LANG=zh python -c 'from xr_syntax.i18n import tr; print(tr("parse failed", 
 | `include_views()`、`class_views()`、`invocation_views()` | 查询 include、类与构造函数、宏式调用 | Query includes, classes and constructors, macro-style invocations |
 | `user_regions()`、`replace_region_body()` | 查询和替换 `User Code` 区域 | Query and replace `User Code` regions |
 | `code_tokens()`、`identifier_occurrences()`、`split_source_list()`、`matching_delimiter()` | 词法查询 | Lexical queries |
+| `CMakeDocument.parse()`、`command_views()`、`top_level_statements()`、`user_regions()`、`replace_region_body()`、`replace_argument()`、`replace_statement()`、`insert_after()`、`remove_command()` | CMake 文档、查询与编辑 | The CMake document, its queries and its edits |
+| `xr_syntax.format`：`layout_statement()`、`layout_value()`、`layout_declaration()`、`layout_call()`、`layout_macro()`、`sort_includes()`、`wrap_comment()`、`Braces` | 按 LibXR 的 clang-format 风格排版生成的代码 | Lay out generated code in the clang-format style of LibXR |
+| `CppFileBuilder`、`CMakeFileBuilder` | 拼装整份生成文件，并在构建时校验它能被解析 | Assemble a whole generated file and check at build time that it parses |
+| `CppDocument.user_regions()`、`replace_region_body()` | 已有 C++ 文件的 `User Code` 区域 | The `User Code` regions of an existing C++ file |
+| `SyntaxTree.replace()` | 底层结构编辑 | Low-level structural edit |
 | `xr_syntax.i18n`：`tr()`、`chinese()`、`localize_argparse()` | 输出语言 | Output language |
 
 设计见 [docs/ARCHITECTURE.md](https://github.com/xrobot-org/xr-syntax/blob/master/docs/ARCHITECTURE.md)，
