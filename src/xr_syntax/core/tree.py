@@ -6,12 +6,15 @@ from __future__ import annotations
 
 import functools
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from xr_syntax.core.diagnostic import Diagnostic
-from xr_syntax.core.fragment import SyntaxFragment
 from xr_syntax.core.green import GreenElement, GreenNode
 from xr_syntax.core.red import SyntaxElement, SyntaxNode
 from xr_syntax.core.text import encode_source
+
+if TYPE_CHECKING:  # pragma: no cover - 只为类型检查导入 / Imported for type checking only
+    from xr_syntax.core.fragment import SyntaxFragment
 
 
 @dataclass(frozen=True)
@@ -145,6 +148,12 @@ class SyntaxTree:
             TypeError: 既不是 SyntaxElement 也不是 SyntaxFragment。
                 The value is neither a SyntaxElement nor a SyntaxFragment.
         """
+        # 片段模块只在真的要做一次编辑时导入：只读地使用语法树（0.2.0 的用户就是这样）不该为它
+        # 付出导入代价。
+        # The fragment module is imported only when an edit is really made: using the syntax tree
+        # read-only, as a 0.2.0 user does, must not pay for it.
+        from xr_syntax.core.fragment import SyntaxFragment
+
         if isinstance(value, SyntaxElement):
             if value.tree.language != self.language:
                 raise ValueError(
