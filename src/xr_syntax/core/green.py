@@ -137,6 +137,20 @@ class GreenNode(_GreenMixin):
         """
         return sum(child.element.byte_width for child in self.children)
 
+    # 低层编辑只重建目标到根的这条路径，路径之外的 green 子树继续复用原对象。
+    # A low-level edit rebuilds only the path from the target to the root; subtrees outside
+    # that path keep reusing the original objects.
+    def replacing_child(self, index: int, element: GreenElement) -> GreenNode:
+        """返回替换指定 child 后的新 GreenNode，并保留原 edge 的 field 标签。
+        Return a copy with one child replaced while preserving that edge's field label.
+        """
+        if index < 0 or index >= len(self.children):
+            raise IndexError(index)
+        children = list(self.children)
+        original = children[index]
+        children[index] = GreenChild(element=element, field=original.field)
+        return GreenNode(kind=self.kind, children=tuple(children), named=self.named)
+
 
 # ---------------------------------------------------------------------------
 # parser 的快速构造
