@@ -102,3 +102,106 @@ the bytes inside a region, reparses with the same parser and returns a new docum
 
 `CppParser` keeps no state and every parse uses its own structural parser, so threads can share
 one `CppParser`. Documents and syntax trees are immutable.
+
+## CMake 前端 / CMake Frontend
+
+CMake 前端（`xr_syntax.cmake`）与 C++ 前端共用同一个不可变语法模型、同一套结构化编辑和同一套区域规则。
+`CMakeParser` 分两阶段解析：第一阶段把文件线性切成命令、注释和 trivia；第二阶段把成对的块命令
+（`if`/`foreach`/`while`/`function`/`macro`）与其结束命令递归组合成 `if_condition`、`foreach_loop`、
+`while_loop`、`function_def`、`macro_def` 节点。参数按写法分成 `quoted_argument`、`bracket_argument` 和
+`unquoted_argument`；行注释在行末换行之前结束，CRLF 的 `\r` 属于换行而不是注释，因此区域的 body span 落在整行
+之后。解析同样断言渲染出的字节与输入相同。
+
+`CMakeDocument` 提供命令视图（`command_views()`，块内的命令也在内）、顶层语句（`top_level_statements()`，
+带紧邻上方的注释范围）、注释、User Code 区域和语句/参数编辑。块命令被组合成 `if_condition` 等节点，随语法树
+遍历即可取到。`CMakeFileBuilder` 把生成的 CMake 拼成整份文件，在 `build()` 时只解析一次。
+
+The CMake frontend (`xr_syntax.cmake`) shares one immutable syntax model, one structural editing model
+and one region rule set with the C++ frontend. `CMakeParser` parses in two stages: the first cuts the
+file into commands, comments and trivia linearly; the second groups paired block commands
+(`if`/`foreach`/`while`/`function`/`macro`) with their end command into `if_condition`,
+`foreach_loop`, `while_loop`, `function_def` and `macro_def` nodes. Arguments are split into
+`quoted_argument`, `bracket_argument` and `unquoted_argument` by their spelling; a line comment ends
+before the line ending, and the `\r` of a CRLF belongs to the line ending rather than the comment, so
+a region's body span starts after the whole line. The parse asserts the same lossless round-trip as
+C++.
+
+`CMakeDocument` offers command views (`command_views()`, commands inside blocks included), top-level
+statements (`top_level_statements()`, with the span of the comments directly above), comments, User
+Code regions, and statement and argument edits. Block commands are grouped into nodes such as
+`if_condition`, which walking the syntax tree finds. `CMakeFileBuilder` assembles generated CMake into
+a whole file and parses it once in `build()`.
+
+## 区域 / Regions
+
+两种语言共用 `core.document.SyntaxDocument` 里的配对与校验规则，只在注释语法和标记正则上不同。配对按栈进行：
+`Begin A / End B / End A` 仍得到区域 A（名字不匹配的 End 既不弹栈也不产生区域），嵌套按源码顺序配对，同名嵌套
+按栈配对，未配对的 Begin 与孤立的 End 不产生区域，区域按 begin 的位置排序。
+
+`replace_region_body()` 校验区域属于当前快照、body span 与两条标记一致且不越界，然后只替换 body 的字节并用同一
+个解析器重新解析；CRLF 与非 UTF-8 字节（surrogateescape）原样保留。C++ 的标记是
+`/* User Code Begin <name> */`，CMake 的是 `# User Code Begin <name>`，两者都区分大小写。
+
+Both languages share the pairing and validation rules in `core.document.SyntaxDocument` and differ only
+in comment syntax and marker patterns. Pairing uses a stack: `Begin A / End B / End A` still yields
+region A (an End with another name neither pops nor produces a region), nesting pairs in source order,
+a nested duplicate name pairs through the stack, an unpaired Begin and a lone End produce no region,
+and regions sort by the position of their begin.
+
+`replace_region_body()` verifies that the region belongs to the current snapshot, that its body span
+matches the two markers and that it stays inside the source, then replaces only the body bytes and
+reparses with the same parser; CRLF and bytes that are not UTF-8 (surrogateescape) are kept as they
+are. The C++ marker is `/* User Code Begin <name> */` and the CMake one is `# User Code Begin <name>`;
+both are case-sensitive.
+
+## 片段与编辑 / Fragments and Edits
+
+green 元素不带位置、不可变，因此可以跨快照复用；它也不带语言，跨语言拼接无法从元素本身发现。`SyntaxFragment`
+与 `SourceDraft` 因此各带一个语言标识：`SyntaxTree.replace()` 只接受本快照的
+元素，或语言匹配的片段；同语言、另一份快照的元素允许（green 无位置，拼接安全），
+跨语言一律拒绝，裸 green 元素也拒绝并要求调用方用 `SyntaxFragment` 显式标注语言。
+
+底层编辑只沿目标的结构路径重建祖先链，路径之外的 green 子树继续复用原对象；它不重新解析，因此新快照的诊断是
+"未验证"。`diagnostic_state` 区分三种情况：`clean`、`diagnosed` 和 `unknown`；`diagnostics` 为空元组本身不区分
+"没有问题"和"未验证"。解析得到的快照，以及 `replace_region_body()`、CMake 按行的 `insert_after()` 与 `remove_command()`
+编辑后的快照（它们改源码后重新解析）总是可信的。
+
+Green elements carry no position and are immutable, so they can be reused across snapshots; they also
+carry no language, so a cross-language splice cannot be detected from the element itself.
+`SyntaxFragment` and `SourceDraft` therefore carry a language tag: `SyntaxTree.replace()` accepts only elements of this snapshot or fragments whose language matches; an element of the same language from another snapshot is allowed (green carries no
+position, so the splice is safe), a different language is always refused, and a bare green element is
+refused too, asking the caller to state the language through a `SyntaxFragment`.
+
+A low-level edit rebuilds only the ancestor chain of the target path and keeps reusing the green
+subtrees outside it; it does not reparse, so the new snapshot's diagnostics are "unverified".
+`diagnostic_state` tells `clean`, `diagnosed` and `unknown` apart; an empty `diagnostics` alone does
+not tell "no problem" from "not verified". A snapshot from a parse, and one from
+`replace_region_body()` or from the line-based CMake `insert_after()` and `remove_command()`, which edit
+the source and parse it again, are always trustworthy.
+
+## 排版与生成 / Layout and Generation
+
+`xr_syntax.format` 是 clang-format 的模拟，不是通用格式化器：它按 LibXR 的 `.clang-format`（Google、列宽 90、
+Allman）排版生成器写出的语句形式。`layout_statement()` 接受一条 `头部(参数, ...);` 语句，参数是不可拆分的文本
+或嵌套的花括号列表，取断行代价最小的排版；`layout_value()`、`layout_declaration()`、`layout_call()`、
+`layout_macro()`、`sort_includes()` 和 `wrap_comment()` 先把值文本拆成花括号列表、调用和指定初始化项，再按
+clang-format 的填行、对齐、列对齐（Regroup 与 ReflowComments）规则排版。运行时不调用 clang-format：版本不同
+输出就可能不同，测试因此用固定版本核对。
+
+`CppFileBuilder` 与 `CMakeFileBuilder` 累积 draft，在 `build()` 时把整份源码解析一次；`require_clean=True`
+要求生成结果没有解析诊断。文件含用户手写代码（User Code 区域）时不用 `require_clean`：那里的内容不受生成器
+控制，它自身的诊断不该让生成失败。
+
+`xr_syntax.format` emulates clang-format rather than formatting in general: it lays out the statement
+forms the generators write, in LibXR's `.clang-format` (Google based, column limit 90, Allman).
+`layout_statement()` takes one ``head(argument, ...);`` statement whose arguments are unbreakable text
+or nested brace lists and picks the cheapest set of breaks; `layout_value()`, `layout_declaration()`,
+`layout_call()`, `layout_macro()`, `sort_includes()` and `wrap_comment()` first split value text into
+brace lists, calls and designated entries and then follow clang-format's fill, alignment and column
+rules (Regroup and ReflowComments). clang-format is not called at run time, because another version
+may format differently, so the tests check against a pinned version.
+
+`CppFileBuilder` and `CMakeFileBuilder` accumulate drafts and parse the whole source once in
+`build()`; `require_clean=True` requires the result to have no parse diagnostics. A file holding
+hand-written user code (a User Code region) does not use `require_clean`: that content is outside the
+generator's control and its own diagnostics must not fail a generation.
