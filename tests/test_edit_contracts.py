@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import pytest
 
+from xr_syntax.cmake import CMakeDocument
 from xr_syntax.core import GreenToken, SyntaxFragment
 from xr_syntax.cpp import CppDocument
 
@@ -29,6 +30,13 @@ def test_a_fragment_of_another_language_is_refused() -> None:
     fragment = SyntaxFragment("cmake", GreenToken("raw", "set(X 1)", named=True))
     with pytest.raises(ValueError, match="fragment language"):
         document.tree.replace(document.root.children[0], fragment)
+
+
+def test_a_red_element_of_another_language_is_refused() -> None:
+    cpp = CppDocument.parse("int a;\n")
+    cmake = CMakeDocument.parse("set(X 1)\n")
+    with pytest.raises(ValueError, match="element language"):
+        cpp.tree.replace(cpp.root.children[0], cmake.root.children[0])
 
 
 def test_a_same_language_element_of_another_snapshot_is_allowed() -> None:
